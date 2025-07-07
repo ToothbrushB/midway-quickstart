@@ -7,13 +7,14 @@ file(GLOB_RECURSE MOTOR_SRCS
 )
 # Include
 set(MOTOR_INCS
-    src/
-)
+    "include/")
 
 # Public component requirement
 set(MOTOR_REQUIRES
     driver
     esp_timer
+    ESP32Encoder
+    esp32_BNO08x
 )
 
 # Private component requirement

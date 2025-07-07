@@ -1,13 +1,17 @@
-// =========================================================================
-// Released under the MIT License
-// Copyright 2017-2018 Natanael Josue Rabello. All rights reserved.
-// For the license information refer to LICENSE file in root directory.
-// =========================================================================
+// 
 
-/**
- * @file mpu_spi.cpp
- * Example on how to setup MPU through SPI for basic usage.
- */
+#include <stdio.h>
+
+#include "freeRTOS\freeRTOS.h"
+#include "freeRTOS\task.h"
+
+#define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
+#include "esp_log.h"
+
+#include "Motor.hpp"
+#include "ESP32Encoder.h"
+#include "driver\ledc.h"
+#include "squiggles.hpp"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -17,99 +21,190 @@
 #include "driver/spi_master.h"
 #include "esp_err.h"
 #include "esp_log.h"
-#include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
-#include "freertos/task.h"
 #include "sdkconfig.h"
+const double MAX_VEL = 0.05;     // in meters per second
+const double MAX_ACCEL = 3.0;   // in meters per second per second
+const double MAX_JERK = 6.0;    // in meters per second per second per second
+const double ROBOT_WIDTH = 0.1; // in meters
+const double WHEEL_RADIUS = 0.0254; // in meters
+const double MAX_RPM = 6000; // in revolutions per minute
 
-#include "SPIbus.hpp"
-#include "MPU.hpp"
-#include "mpu/math.hpp"
-#include "mpu/types.hpp"
+static const char* TAG = "MAIN";
 
-static const char* TAG = "example";
+static void gyro_task(void* pvParameters)
+{
+    printf("Reading sensor data:\n");
+   
+}
 
-static constexpr int MOSI = 23;
-static constexpr int MISO = 19;
-static constexpr int SCLK = 18;
-static constexpr int CS = 5;
-static constexpr uint32_t CLOCK_SPEED = 1000000;  // up to 1MHz for all registers, and 20MHz for sensor data registers only
 
 extern "C" void app_main() {
-    printf("$ MPU Driver Example: MPU-SPI\n");
-    fflush(stdout);
+    auto constraints = squiggles::Constraints(MAX_VEL, MAX_ACCEL, MAX_JERK);
+    auto generator = squiggles::SplineGenerator(
+    constraints,
+    std::make_shared<squiggles::TankModel>(ROBOT_WIDTH, constraints));
 
-    spi_device_handle_t mpu_spi_handle;
-    // Initialize SPI on HSPI host through SPIbus interface:
-    vspi.begin(MOSI, MISO, SCLK);
-    vspi.addDevice(0, CLOCK_SPEED, CS, &mpu_spi_handle);
+    auto path = generator.generate({squiggles::Pose(0.0, 0.0, 1.0), squiggles::Pose(2.0, 2.0, 1.0)});
 
-    // Or directly with esp-idf API:
-    /*
-    spi_bus_config_t spi_config;
-    spi_config.mosi_io_num = MOSI;
-    spi_config.miso_io_num = MISO;
-    spi_config.sclk_io_num = SCLK;
-    spi_config.quadwp_io_num = -1;
-    spi_config.quadhd_io_num = -1;
-    spi_config.max_transfer_sz = SPI_MAX_DMA_LEN;
-    ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_config, 0));
-    spi_device_interface_config_t dev_config;
-    dev_config.command_bits = 0;
-    dev_config.address_bits = 8;
-    dev_config.dummy_bits = 0;
-    dev_config.mode = 0;
-    dev_config.duty_cycle_pos = 128;
-    dev_config.cs_ena_pretrans = 0; 
-    dev_config.cs_ena_posttrans = 0;
-    dev_config.clock_speed_hz = CLOCK_SPEED;
-    dev_config.spics_io_num = CS;
-    dev_config.flags = 0;
-    dev_config.queue_size = 1;
-    dev_config.pre_cb = NULL;
-    dev_config.post_cb = NULL;
-    ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &dev_config, &mpu_spi_handle));
-    */
+    
+    
+    ESP32Encoder encoderLeft;
+    ESP32Encoder encoderRight;
+    encoderLeft.attachFullQuad(15,2);
+    encoderRight.attachFullQuad(34, 35);
 
-    printf("$ Done starting vspi\n");
-    MPU_t MPU;  // create a default MPU object
-    MPU.setBus(vspi);  // set bus port, not really needed here since default is HSPI
-    MPU.setAddr(mpu_spi_handle);  // set spi_device_handle, always needed!
+    Motor motorLeft;
+    Motor motorRight;
+    motorRight.setup(GPIO_NUM_13, GPIO_NUM_12, 4, LEDC_TIMER_0, LEDC_CHANNEL_0);
+    motorLeft.setup(GPIO_NUM_14, GPIO_NUM_27, 16, LEDC_TIMER_1, LEDC_CHANNEL_1);
+    
 
-    // Great! Let's verify the communication
-    // (this also check if the connected MPU supports the implementation of chip selected in the component menu)
-    while (esp_err_t err = MPU.testConnection()) {
-        ESP_LOGE(TAG, "Failed to connect to the MPU, error=%#X", err);
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+
+    // use the generated path velocities to control the motors
+    for (const auto& point : path) {
+        ESP_LOGI(TAG, "Time: %f", point.time);
+        
+        ESP_LOGI(TAG, "Wheel Velocities: %f, %f", point.wheel_velocities[0], point.wheel_velocities[1]);
+        // Set motor direction based on the velocity sign
+        motorLeft.set(point.wheel_velocities[0] / MAX_VEL);
+        motorRight.set(point.wheel_velocities[1] / MAX_VEL);
+        
+        vTaskDelay(static_cast<int>(100 / portTICK_PERIOD_MS));
     }
-    ESP_LOGI(TAG, "MPU connection successful!");
+    // motorRight.set(0.5);
+    // while (true) {
+    //     ESP_LOGI(TAG, "right fwd");
+    //     motorRight.set(0.5);
+    //     motorLeft.set(0.5);
 
-    // Initialize
-    ESP_ERROR_CHECK(MPU.initialize());  // initialize the chip and set initial configurations
-    // Setup with your configurations
-    ESP_ERROR_CHECK(MPU.setSampleRate(50));  // set sample rate to 50 Hz
-    ESP_ERROR_CHECK(MPU.setGyroFullScale(mpud::GYRO_FS_500DPS));
-    ESP_ERROR_CHECK(MPU.setAccelFullScale(mpud::ACCEL_FS_4G));
+    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //     ESP_LOGI(TAG, "right rev");
+    //     motorRight.set(-0.5);
+    //     motorLeft.set(-0.5);
+    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    // }
+// motorRight.set(0.0);
 
-    // Reading sensor data
-    printf("Reading sensor data:\n");
-    mpud::raw_axes_t accelRaw;   // x, y, z axes as int16
-    mpud::raw_axes_t gyroRaw;    // x, y, z axes as int16
-    mpud::raw_axes_t magRaw;     // x, y, z axes as int16 (if magnetometer is present)
-    mpud::float_axes_t accelG;   // accel axes in (g) gravity format
-    mpud::float_axes_t gyroDPS;  // gyro axes in (DPS) º/s format
-    while (true) {
-        // Read
-        // MPU.acceleration(&accelRaw);  // fetch raw data from the registers
-        // MPU.rotation(&gyroRaw);       // fetch raw data from the registers
-        MPU.motion(&accelRaw, &gyroRaw, &magRaw);  // read both in one shot
-        // Convert
-        accelG = mpud::accelGravity(accelRaw, mpud::ACCEL_FS_4G);
-        gyroDPS = mpud::gyroDegPerSec(gyroRaw, mpud::GYRO_FS_500DPS);
-        mag = mpud::
-        // Debug
-        printf("accel: [%+6.2f %+6.2f %+6.2f ] (G) \t", accelG.x, accelG.y, accelG.z);
-        printf("gyro: [%+7.2f %+7.2f %+7.2f ] (º/s)\n", gyroDPS[0], gyroDPS[1], gyroDPS[2]);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
+    // read_gyro = true;
+
+    // xTaskCreate(gyro_task, "gyroTask", 2048, NULL, 5, NULL);
 }
+
+// #include <stdio.h>
+// #include "BNO08x.hpp"
+
+// static const constexpr char* TAG = "Main";
+
+// extern "C" void app_main(void)
+// {
+//     static BNO08x imu;
+
+//     // initialize imu
+//     if (!imu.initialize())
+//     {
+//         ESP_LOGE(TAG, "Init failure, returning from main.");
+//         return;
+//     }
+
+//     // enable game rotation vector and calibrated gyro reports
+//     imu.rpt.rv_game.enable(100000UL); // 100,000us == 100ms report interval
+//     // imu.rpt.cal_gyro.enable(100000UL);
+//     // imu.rpt.gravity.enable(100000UL);
+//     // imu.rpt.accelerometer.enable(100000UL);
+//     // imu.rpt.linear_accelerometer.enable(100000UL);
+
+//     // see BNO08x::bno08x_reports_t for all possible reports to enable
+
+//     // register callback to execute for all reports, 2 different methods
+
+//     imu.dynamic_calibration_run_routine();
+//     // method 1, void input param:
+//     imu.register_cb(
+//             []()
+//             {
+//                 if (imu.rpt.rv_game.has_new_data())
+//                 {
+//                     bno08x_euler_angle_t euler = imu.rpt.rv_game.get_euler();
+//                     // ESP_LOGW(TAG, "Euler Angle: (x (roll): %.2f y (pitch): %.2f z (yaw): %.2f)[deg]", euler.x, euler.y, euler.z);
+//                 }
+
+//                 // if (imu.rpt.cal_gyro.has_new_data())
+//                 // {
+//                 //     bno08x_gyro_t velocity = imu.rpt.cal_gyro.get();
+//                 //     ESP_LOGW(TAG, "Velocity: (x: %.2f y: %.2f z: %.2f)[rad/s]", velocity.x, velocity.y, velocity.z);
+//                 // }
+
+//                 // if (imu.rpt.gravity.has_new_data())
+//                 // {
+//                 //     bno08x_accel_t grav = imu.rpt.gravity.get();
+//                 //     ESP_LOGW(TAG, "Gravity: (x: %.2f y: %.2f z: %.2f)[m/s^2]", grav.x, grav.y, grav.z);
+//                 // }
+
+//                 // if (imu.rpt.accelerometer.has_new_data())
+//                 // {
+//                 //     bno08x_accel_t ang_accel = imu.rpt.accelerometer.get();
+//                 //     ESP_LOGW(TAG, "Angular Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", ang_accel.x, ang_accel.y, ang_accel.z);
+//                 // }
+
+//                 // if (imu.rpt.linear_accelerometer.has_new_data())
+//                 // {
+//                 //     bno08x_accel_t lin_accel = imu.rpt.accelerometer.get();
+//                 //     ESP_LOGW(TAG, "Linear Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", lin_accel.x, lin_accel.y, lin_accel.z);
+//                 // }
+//             });
+
+//     // method 2, report ID param (comment method 1 out before commenting this in):
+//     /*
+//     imu.register_cb(
+//             [](uint8_t rpt_ID)
+//             {
+//                 static bno08x_euler_angle_t euler;
+//                 static bno08x_gyro_t velocity;
+//                 static bno08x_accel_t grav;
+//                 static bno08x_accel_t ang_accel;
+//                 static bno08x_accel_t lin_accel;
+
+//                 switch (rpt_ID)
+//                 {
+//                     case SH2_GAME_ROTATION_VECTOR:
+//                         euler = imu.rpt.rv_game.get_euler();
+//                         ESP_LOGW(TAG, "Euler Angle: (x (roll): %.2f y (pitch): %.2f z (yaw): %.2f)[deg]", euler.x, euler.y,
+//                                 euler.z);
+//                         break;
+
+//                     case SH2_CAL_GYRO:
+//                         velocity = imu.rpt.cal_gyro.get();
+//                         ESP_LOGW(TAG, "Velocity: (x: %.2f y: %.2f z: %.2f)[rad/s]", velocity.x, velocity.y, velocity.z);
+//                         break;
+
+//                     case SH2_GRAVITY:
+//                         grav = imu.rpt.gravity.get();
+//                         ESP_LOGW(TAG, "Gravity: (x: %.2f y: %.2f z: %.2f)[m/s^2]", grav.x, grav.y, grav.z);
+//                         break;
+
+//                     case SH2_ACCELEROMETER:
+//                         ang_accel = imu.rpt.accelerometer.get();
+//                         ESP_LOGW(TAG, "Angular Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", ang_accel.x, ang_accel.y, ang_accel.z);
+//                         break;
+
+//                     case SH2_LINEAR_ACCELERATION:
+//                         lin_accel = imu.rpt.accelerometer.get();
+//                         ESP_LOGW(TAG, "Linear Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", lin_accel.x, lin_accel.y, lin_accel.z);
+//                         break;
+
+//                     default:
+
+//                         break;
+//                 }
+//             });
+
+//     */
+
+//     while (1)
+//     {
+//         // delay time is irrelevant, we just don't want to trip WDT
+//         vTaskDelay(10000UL / portTICK_PERIOD_MS);
+//     }
+// }

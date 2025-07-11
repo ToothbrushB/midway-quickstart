@@ -23,6 +23,9 @@
 #include "esp_log.h"
 #include "freertos/portmacro.h"
 #include "sdkconfig.h"
+#include "SNTPHelper.hpp"
+#include "WifiHelper.hpp"
+#include "Telemetry.hpp"
 const double MAX_VEL = 0.05;     // in meters per second
 const double MAX_ACCEL = 3.0;   // in meters per second per second
 const double MAX_JERK = 6.0;    // in meters per second per second per second
@@ -32,59 +35,64 @@ const double MAX_RPM = 6000; // in revolutions per minute
 
 static const char* TAG = "MAIN";
 
-static void gyro_task(void* pvParameters)
-{
-    printf("Reading sensor data:\n");
+// static void gyro_task(void* pvParameters)
+// {
+//     printf("Reading sensor data:\n");
    
-}
+// }
 
 
 extern "C" void app_main() {
-    auto constraints = squiggles::Constraints(MAX_VEL, MAX_ACCEL, MAX_JERK);
-    auto generator = squiggles::SplineGenerator(
-    constraints,
-    std::make_shared<squiggles::TankModel>(ROBOT_WIDTH, constraints));
+    // auto constraints = squiggles::Constraints(MAX_VEL, MAX_ACCEL, MAX_JERK);
+    // auto generator = squiggles::SplineGenerator(
+    // constraints,
+    // std::make_shared<squiggles::TankModel>(ROBOT_WIDTH, constraints));
 
-    auto path = generator.generate({squiggles::Pose(0.0, 0.0, 1.0), squiggles::Pose(2.0, 2.0, 1.0)});
+    // auto path = generator.generate({squiggles::Pose(0.0, 0.0, 1.0), squiggles::Pose(2.0, 2.0, 1.0)});
 
     
     
-    ESP32Encoder encoderLeft;
+    // ESP32Encoder encoderLeft;
     ESP32Encoder encoderRight;
-    encoderLeft.attachFullQuad(15,2);
-    encoderRight.attachFullQuad(34, 35);
+    // encoderLeft.attachFullQuad(34,35);
+    encoderRight.attachFullQuad(36,39);
 
-    Motor motorLeft;
-    Motor motorRight;
-    motorRight.setup(GPIO_NUM_13, GPIO_NUM_12, 4, LEDC_TIMER_0, LEDC_CHANNEL_0);
-    motorLeft.setup(GPIO_NUM_14, GPIO_NUM_27, 16, LEDC_TIMER_1, LEDC_CHANNEL_1);
-    
+    Motor motorRight = Motor("RightMotor");
+    motorRight.setup(GPIO_NUM_12, GPIO_NUM_13, 4, LEDC_TIMER_0, LEDC_CHANNEL_0);
+    // motorLeft.setup(GPIO_NUM_14, GPIO_NUM_27, 16, LEDC_TIMER_1, LEDC_CHANNEL_1);
 
 
+    motorRight.addEncoder(encoderRight);
+
+    motorRight.setPIDConstants({.1, 0.05, 0.0, .1}); // Example PID constants
+    // must be in order SNTP, MQTT, WiFi bc SNTP does the NVS/eventloop stuff
+    // SNTPHelper::init();
+    // SNTPHelper::setTimeZone("CST6CDT,M3.2.0,M11.1.0");
+    // Telemetry::init();
+    // WifiHelper::init();
+    // SNTPHelper::start();
+    // SNTPHelper::print_servers();
 
     // use the generated path velocities to control the motors
-    for (const auto& point : path) {
-        ESP_LOGI(TAG, "Time: %f", point.time);
+    // for (const auto& point : path) {
+    //     ESP_LOGI(TAG, "Time: %f", point.time);
         
-        ESP_LOGI(TAG, "Wheel Velocities: %f, %f", point.wheel_velocities[0], point.wheel_velocities[1]);
-        // Set motor direction based on the velocity sign
-        motorLeft.set(point.wheel_velocities[0] / MAX_VEL);
-        motorRight.set(point.wheel_velocities[1] / MAX_VEL);
+    //     ESP_LOGI(TAG, "Wheel Velocities: %f, %f", point.wheel_velocities[0], point.wheel_velocities[1]);
+    //     // Set motor direction based on the velocity sign
+    //     motorLeft.set(point.wheel_velocities[0] / MAX_VEL);
+    //     motorRight.set(point.wheel_velocities[1] / MAX_VEL);
         
-        vTaskDelay(static_cast<int>(100 / portTICK_PERIOD_MS));
-    }
-    // motorRight.set(0.5);
-    // while (true) {
-    //     ESP_LOGI(TAG, "right fwd");
-    //     motorRight.set(0.5);
-    //     motorLeft.set(0.5);
-
-    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
-    //     ESP_LOGI(TAG, "right rev");
-    //     motorRight.set(-0.5);
-    //     motorLeft.set(-0.5);
-    //     vTaskDelay(1000 / portTICK_PERIOD_MS);
+    //     vTaskDelay(static_cast<int>(100 / portTICK_PERIOD_MS));
     // }
+    // motorRight.set(0.5);
+
+    motorRight.setReferenceRpm(8);
+    
+    while (true) {
+
+        vTaskDelay(250 / portTICK_PERIOD_MS);
+
+    }
 // motorRight.set(0.0);
 
     // read_gyro = true;

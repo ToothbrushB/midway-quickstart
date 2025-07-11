@@ -5,17 +5,20 @@
 #include "ESP32Encoder.h"
 #include <math.h>
 #include <esp_timer.h>
+#include <Telemetry.hpp>
 
-#define MOTOR_PWM_FREQ 1000 // 1 kHz PWM frequency
+#define MOTOR_PWM_FREQ 25000 // 25 kHz PWM frequency
 #define MOTOR_PWM_RES LEDC_TIMER_10_BIT
 #define MOTOR_PWM_MODE LEDC_HIGH_SPEED_MODE
 
-#define N 20
-#define Ts 250 // usec
+#define Ts 1000 // usec
+#define TELEMETRY_PERIOD 50000 // usec
+#define RATIO 26.4
 
 // setup tag for esp logging
 static const char* TAG = "Motor";
-Motor::Motor()
+Motor::Motor(const char* name):
+name(name)
 {
 }
 
@@ -25,6 +28,8 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, int pwm, ledc_timer_t timer, l
     this->channel = channel;
     motorIn1 = in1;
     motorIn2 = in2;
+    ESP_ERROR_CHECK(gpio_reset_pin(in1));
+    ESP_ERROR_CHECK(gpio_reset_pin(in2));
     // Set the GPIOs for IN1 and IN2
     ESP_ERROR_CHECK(gpio_set_direction(in1, GPIO_MODE_OUTPUT));
     ESP_ERROR_CHECK(gpio_set_direction(in2, GPIO_MODE_OUTPUT));
@@ -51,15 +56,43 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, int pwm, ledc_timer_t timer, l
         .flags = {
             .output_invert = 0}};
     ledc_channel_config(&ledc_channel);
+
+    esp_timer_create_args_t timer_args = {
+        .callback = [](void* arg) {
+            Motor* motor = static_cast<Motor*>(arg);
+            motor->publishTelemetry(); // Call the publishTelemetry method
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "MotorTelemetryTimer",
+        .skip_unhandled_events = false
+    };
+    esp_timer_create(&timer_args, &telemetryTimer);
+    esp_timer_start_periodic(telemetryTimer, TELEMETRY_PERIOD);
 }
 
-// get encoder distance in cm
-// This function should calculate the distance based on the encoder ticks and wheel radius
-double Motor::getDistanceCm()
+void Motor::publishTelemetry() {
+    int64_t distanceTicks = getDistanceTicks();
+    double speed = getMotorSpeed();
+
+    // // Publish telemetry data
+    // size_t nbytes = snprintf(NULL, 0, "Speed: %f, Ticks: %lld, output: %f", speed, distanceTicks, output) + 1; /* +1 for the '\0' */
+    // char *str = (char*)malloc(nbytes);
+    // snprintf(str, nbytes, "Speed: %f, Ticks: %lld, output: %f", speed, distanceTicks, output);
+
+    // Telemetry::publishData(name, str);
+    // free(str); // Free the allocated memory after publishing
+    ESP_LOGI(TAG, "Motor: %s, Speed: %f, Ticks: %lld, Output: %f, RMS Error: %f", name, speed, distanceTicks, output, rmsError);
+
+}
+
+int64_t Motor::getDistanceTicks()
 {
-    double distance = (encoder.getCount() / ticksPerRevolution) * (2 * M_PI * wheelRadius);
-    // ESP_LOGI(TAG, "Distance traveled: %f cm", distance);
-    return distance;
+        if (!encoder) {
+        ESP_LOGE(TAG, "Encoder not initialized!");
+        return 0;
+    }
+    return encoder->getCount();
 }
 
 // set pid constants
@@ -72,69 +105,62 @@ void Motor::setPIDConstants(PIDConfig pidConfig)
     previousTime = 0.0; // Initialize previous time
 }
 
-// set velocity for pid controller
-void Motor::setVelocityCmPerSec(double velocityCmPerSec)
+void Motor::setReferenceRpm(double rpm)
 {
-    pidSetpoint = velocityCmPerSec / (2 * M_PI * wheelRadius) * ticksPerRevolution; // Convert cm/s to ticks/s
+    pidSetpoint = rpm; // Set the target speed in rpm
+    ESP_LOGI(TAG, "PID Setpoint: %f", pidSetpoint);
 }
-
-
-void Motor::setupMath(double wheelRadius, double ticksPerRevolution)
-{
-    this->wheelRadius = wheelRadius;
-    this->ticksPerRevolution = ticksPerRevolution;
-}
-
-long sum = 0;
-struct {
-  long x[N];  // encoder positions 
-  unsigned long t[N];   // time marks in msec.
-} xbuffer;
-
-float u, a_, pos, motor_speed, moment= 0;
-int64_t counts = 0;
-int ind=0;
 
 void Motor::checkEncoder()
 {
-    counts = encoder.getCount(); // Get the current encoder count
+
+    counts = encoder->getCount(); // Get the current encoder count
+    // diffCounts = counts-prevCounts;
+    // prevCounts = counts;
     unsigned long tt = esp_timer_get_time();
     sum -= xbuffer.x[ind];   // (k-(N-1)) will be replaced by k+1 for N-buffer
     xbuffer.x[ind] = counts;
     xbuffer.t[ind] = tt;
     sum += xbuffer.x[ind];
-    moment += N*xbuffer.x[ind]-sum;
-    a_ = ((4*N-2)*(float)sum - 6*moment)/(N*(N+1));
-    motor_speed = (-6*(N-1)*(float)sum + 12*moment)/(N*(N+1))/(Ts*N);
-    pos = (a_ + motor_speed*Ts*N)/(1000.0/360.0);  // ticks
-    motor_speed *= 60000.0;                        // ticks per sec (us to min)
+    moment += MOTOR_BUFFER_SIZE*xbuffer.x[ind]-sum;
+    a_ = ((4*MOTOR_BUFFER_SIZE-2)*(float)sum - 6*moment)/(MOTOR_BUFFER_SIZE*(MOTOR_BUFFER_SIZE+1));
+    motor_speed = (-6*(MOTOR_BUFFER_SIZE-1)*(float)sum + 12*moment)/(MOTOR_BUFFER_SIZE*(MOTOR_BUFFER_SIZE+1))/(Ts*MOTOR_BUFFER_SIZE);
+    pos = (a_ + motor_speed*Ts*MOTOR_BUFFER_SIZE)/(RATIO*1000.0/360.0);  // ticks
+    motor_speed *= 60000.0/RATIO;                        // ticks per min (us to min)
+
+    // ESP_LOGI(TAG, "sum: %ld, Time: %lu, ind: %d, ind[0]: %ld, ind[1]: %ld, ind[2]: %ld, ind[3]: %ld, ind[4]: %ld", 
+    //          sum, tt, ind, xbuffer.x[0], xbuffer.x[1], xbuffer.x[2], xbuffer.x[3], xbuffer.x[4]);
 
 ++ind;
-  ind = ind % N;
+  ind = ind % MOTOR_BUFFER_SIZE;
 
 //   if (ind == 0)
 //   ESP_LOGI(TAG, "Encoder Position: %lld, Time: %lu, Motor Speed: %f, Acceleration: %f, Position: %f", 
 //            counts, tt, motor_speed, a_, pos);
 }
 
+double Motor::getMotorSpeed() {
+    return motor_speed; // Return the current motor speed
+}
 
 
-void Motor::addEncoder(ESP32Encoder encoder)
+
+void Motor::addEncoder(ESP32Encoder& encoder)
 {
-    this->encoder = encoder;
-    esp_timer_handle_t timer;
+    this->encoder = &encoder;
     esp_timer_create_args_t timer_args = {
         .callback = [](void* arg) {
             Motor* motor = static_cast<Motor*>(arg);
             motor->checkEncoder(); // Call the velocity calculation method
+            motor->calculatePID(); // Call the PID calculation method
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
         .name = "MotorVelocityTimer",
         .skip_unhandled_events = false
     };
-    esp_timer_create(&timer_args, &timer);
-    esp_timer_start_periodic(timer, 250);
+    esp_timer_create(&timer_args, &velocityTimer);
+    esp_timer_start_periodic(velocityTimer, Ts);
 }
 
 // Calculate the PID control output
@@ -143,26 +169,34 @@ void Motor::addEncoder(ESP32Encoder encoder)
 double Motor::calculatePID()
 {
     int64_t currentTime = esp_timer_get_time(); // Get the current time in microseconds
-    double deltaTime = (currentTime - previousTime) / 1e6;
     previousTime = currentTime;
 
-    double error = pidSetpoint - motor_speed; // Calculate the error
+    error[i] = pidSetpoint - motor_speed; // Calculate the error
 
     double derivative = 0.0; // Initialize derivative term
-    if (deltaTime < 500e3) { // only do i and d if time difference is less than 500ms (so don't run i and d on first loop)
-        integral += error*deltaTime; // Update the integral term
-        double derivative = (error - previousError) / deltaTime; // Calculate the derivative term
-        previousError = error; // Update the previous error
-    }
+    integral += error[i]*Ts/1e6; // Update the integral term
+    derivative = (error[i] - previousError) / Ts*1e6; // Calculate the derivative term
+    previousError = error[i]; // Update the previous error
+    
 
     // Calculate PID output
-    double output = pidConfig.kP * error + pidConfig.kI * integral + pidConfig.kD * derivative;
+    double pidOutput = pidConfig.kP * error[i] + pidConfig.kI * integral + pidConfig.kD * derivative + pidSetpoint*pidConfig.kF;
 
     // Set the motor speed based on the PID output
-    set(output);
+    set(pidOutput);
 
-    ESP_LOGI(TAG, "PID Output: %f, Setpoint: %f, Current Speed: %f, Error: %f, dT: %f, P: %f, I: %f: D: %f", output, pidSetpoint, motor_speed, error, deltaTime, pidConfig.kP * error, pidConfig.kI * integral, pidConfig.kD * derivative);
-    return output;
+    // calculator RMS error of the buffer and store in variable
+    rmsError = 0.0;
+    for (int j = 0; j < ERROR_BUFFER_SIZE; ++j) {
+        rmsError += error[j] * error[j];
+    }
+    rmsError = sqrt(rmsError / ERROR_BUFFER_SIZE);
+
+    ++i;
+    i = i % ERROR_BUFFER_SIZE; // Wrap around the error buffer index
+
+    // ESP_LOGI(TAG, "PID Output: %f, Setpoint: %f, Current Speed: %f, Error: %f, dT: %f, P: %f, I: %f: D: %f", output, pidSetpoint, motor_speed, error, deltaTime, pidConfig.kP * error, pidConfig.kI * integral, pidConfig.kD * derivative);
+    return pidOutput;
 }
 
 // speed: [-1,1]
@@ -185,6 +219,7 @@ void Motor::set(double speed)
         speed = 1;
     else if (speed < -1)
         speed = -1;
+    output = speed;
     ledc_set_duty(MOTOR_PWM_MODE, channel, (int)(abs(speed)*1024));
     ledc_update_duty(MOTOR_PWM_MODE, channel);
     // ESP_LOGI(TAG, "Motor set to speed: %d", (int)(abs(speed)*1024));

@@ -15,6 +15,12 @@ set(MOTOR_REQUIRES
     esp_timer
     ESP32Encoder
     esp32_BNO08x
+    mqtt
+    esp-tls
+    esp_netif
+    esp_wifi
+    nvs_flash
+    esp_event
 )
 
 # Private component requirement

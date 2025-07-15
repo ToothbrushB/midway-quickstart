@@ -8,16 +8,10 @@
 
 static const char* TAG = "Telemetry";
 esp_mqtt_client_handle_t Telemetry::client; // Static member variable definition
-bool Telemetry::isInitialized = false; // Static member variable definition
+bool Telemetry::isConnected = false; // Static member variable definition
 
-static void log_error_if_nonzero(const char *message, int error_code)
-{
-    if (error_code != 0) {
-        ESP_LOGE(TAG, "Last error %s: 0x%x", message, error_code);
-    }
-}
 
-static const std::string BASE_TOPIC = std::string(WifiHelper::get_mac_string()) + "/"; // Use the MAC address as the base topic
+std::string Telemetry::BASE_TOPIC;
 /*
  * @brief Event handler registered to receive MQTT events
  *
@@ -28,7 +22,7 @@ static const std::string BASE_TOPIC = std::string(WifiHelper::get_mac_string()) 
  * @param event_id The id for the received event.
  * @param event_data The data for the event, esp_mqtt_event_handle_t.
  */
-static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32, base, event_id);
     esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
@@ -39,6 +33,9 @@ static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        isConnected = true;
+        esp_mqtt_client_publish(client, (BASE_TOPIC + "status").c_str(), "Device started", 0, 1, 0);
+
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -91,13 +88,19 @@ void Telemetry::init() {
     };
 
     client = esp_mqtt_client_init(&mqtt_cfg);
-
+    Telemetry::BASE_TOPIC = std::string(WifiHelper::get_mac_string()) + "/"; // Use the MAC address as the base topic
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, mqtt5_event_handler, NULL);
-
     esp_mqtt_client_start(client);
-    isInitialized = true;
-    esp_mqtt_client_publish(client, (BASE_TOPIC + "status").c_str(), "Device started", 0, 1, 0);
+
+
+}
+
+void Telemetry::waitForConnection() {
+    while (!isConnected) {
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+        ESP_LOGI(TAG, "Waiting for MQTT connection...");
+    }
 }
 
 void Telemetry::deinit() {
@@ -106,6 +109,40 @@ void Telemetry::deinit() {
 
 void Telemetry::publishData(const char* topic, const char* payload) {
     // Publish data to MQTT topic
-    if (isInitialized)
-    esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload, 0, 1, 0);
+    if (isConnected)
+        esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload, 0, 1, 0);
+}
+
+
+void Telemetry::publishData(const char* topic, double payload) {
+    // Publish double data to MQTT topic
+    if (isConnected) {
+        char payload_str[32]; // no need to free because stack
+        snprintf(payload_str, sizeof(payload_str), "%.2f", payload);
+        esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload_str, 0, 1, 0);
+    }
+}
+
+void Telemetry::publishData(const char* topic, int payload) {
+    // Publish integer data to MQTT topic
+    if (isConnected) {
+        char payload_str[32]; // no need to free because stack
+        snprintf(payload_str, sizeof(payload_str), "%d", payload);
+        esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload_str, 0, 1, 0);
+    }
+}
+
+void Telemetry::publishData(const char* topic, bool payload) {
+    // Publish boolean data to MQTT topic
+    if (isConnected) {
+        const char* payload_str = payload ? "true" : "false";
+        esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload_str, 0, 1, 0);
+    }
+}
+
+void Telemetry::publishData(const char* topic, std::string payload) {
+    // Publish string data to MQTT topic
+    if (isConnected) {
+        esp_mqtt_client_publish(client, (BASE_TOPIC + topic).c_str(), payload.c_str(), 0, 1, 0);
+    }
 }

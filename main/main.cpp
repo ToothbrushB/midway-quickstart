@@ -26,78 +26,186 @@
 #include "SNTPHelper.hpp"
 #include "WifiHelper.hpp"
 #include "Telemetry.hpp"
+#include "Odometry.hpp"
+#include "PurePursuit.hpp"
 const double MAX_VEL = 0.05;     // in meters per second
 const double MAX_ACCEL = 3.0;   // in meters per second per second
 const double MAX_JERK = 6.0;    // in meters per second per second per second
-const double ROBOT_WIDTH = 0.1; // in meters
-const double WHEEL_RADIUS = 0.0254; // in meters
-const double MAX_RPM = 6000; // in revolutions per minute
+const double ROBOT_WIDTH = 0.13; // in meters
+const double WHEEL_RADIUS = 0.033; // in meters
 
+const double SCALE_FACTOR = 50; // Scale factor for curvature to match the robot's scale
 static const char* TAG = "MAIN";
 
-// static void gyro_task(void* pvParameters)
-// {
-//     printf("Reading sensor data:\n");
-   
-// }
+#define LINSPEED 0.03
+ESP32Encoder encoderLeft;
+ESP32Encoder encoderRight;
 
+Motor motorLeft = Motor("LeftMotor");
+Motor motorRight = Motor("RightMotor");
+static void runTheRobot(void* pvParameters)
+{
+//     ESP_LOGI(TAG, "Free heap before path generation: %lu bytes", esp_get_free_heap_size());
+//     ESP_LOGI(TAG, "Minimum free heap: %lu bytes", esp_get_minimum_free_heap_size());
 
-extern "C" void app_main() {
-    // auto constraints = squiggles::Constraints(MAX_VEL, MAX_ACCEL, MAX_JERK);
-    // auto generator = squiggles::SplineGenerator(
-    // constraints,
-    // std::make_shared<squiggles::TankModel>(ROBOT_WIDTH, constraints));
+//    auto constraints = squiggles::Constraints(MAX_VEL, MAX_ACCEL, MAX_JERK);
+//     auto generator = squiggles::SplineGenerator(
+//     constraints,
+//     std::make_shared<squiggles::TankModel>(ROBOT_WIDTH, constraints),
+//     0.5); // 0.5 seconds between path points
 
-    // auto path = generator.generate({squiggles::Pose(0.0, 0.0, 1.0), squiggles::Pose(2.0, 2.0, 1.0)});
+//     auto path = generator.generate({squiggles::Pose(0.0, 0.0, 0.0), squiggles::Pose(2.0, 0.0, 0.0)});
+    
 
     
-    
-    // ESP32Encoder encoderLeft;
-    ESP32Encoder encoderRight;
-    // encoderLeft.attachFullQuad(34,35);
-    encoderRight.attachFullQuad(36,39);
+    // collect path[i].vector.pose.x into an array float* xPoses
+    float xPoses[200];
+    float yPoses[200];
+    for (int i = 0; i < 200; ++i) {
+        float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
+        xPoses[i] = cos(t)*sin(3*t); 
+        yPoses[i] = sin(t)*sin(3*t);
+    }
 
-    Motor motorRight = Motor("RightMotor");
-    motorRight.setup(GPIO_NUM_12, GPIO_NUM_13, 4, LEDC_TIMER_0, LEDC_CHANNEL_0);
-    // motorLeft.setup(GPIO_NUM_14, GPIO_NUM_27, 16, LEDC_TIMER_1, LEDC_CHANNEL_1);
+    // publish entire xPoses and yPoses into MQTT
+    for (size_t i = 0; i < 200; ++i) {
+        Telemetry::publishData("path", std::to_string(xPoses[i]) + ", " + std::to_string(yPoses[i]));
+    }
+
+    PurePursuit purePursuit = PurePursuit(0.05); // Look ahead distance
+    purePursuit.setPath(xPoses, yPoses, 200);
+    purePursuit.start();
 
 
-    motorRight.addEncoder(encoderRight);
 
-    motorRight.setPIDConstants({.1, 0.05, 0.0, .1}); // Example PID constants
-    // must be in order SNTP, MQTT, WiFi bc SNTP does the NVS/eventloop stuff
-    // SNTPHelper::init();
-    // SNTPHelper::setTimeZone("CST6CDT,M3.2.0,M11.1.0");
-    // Telemetry::init();
-    // WifiHelper::init();
-    // SNTPHelper::start();
-    // SNTPHelper::print_servers();
+    // motorRight.set(1);
+    Odometry::seed(Pose2d({0.0,0.0,0.0})); // Seed the odometry with a starting pose
+    Odometry::updateSimpleNoImu(0.05, 0.0, esp_timer_get_time());
 
-    // use the generated path velocities to control the motors
-    // for (const auto& point : path) {
-    //     ESP_LOGI(TAG, "Time: %f", point.time);
+    Pose2d pose;
+    // double lastCurvature = 0.0;
+            
+        // double curvature = purePursuit.getCurvature();
+        // double dcdt = (curvature - lastCurvature) / 0.050;
+        // curvature = curvature - dcdt*0.001; // add damping
         
-    //     ESP_LOGI(TAG, "Wheel Velocities: %f, %f", point.wheel_velocities[0], point.wheel_velocities[1]);
+        // // print raw curvature, dcdt, corrected curvature, output curvature
+        // printf("Curvature: %f, dcdt: %f, Corrected Curvature: %f", 
+        //     purePursuit.getCurvature(), dcdt, curvature);
+        // if (curvature > 100) {
+        //     curvature = 100; // Limit curvature
+        // } else if (curvature < -100) {
+        //     curvature = -100; // Limit curvature
+        // }
+
+        // lastCurvature = curvature;
+    while (true) {
+        purePursuit.compute(pose.getX(),
+                            pose.getY(),
+                            pose.getHeading());
+        double omega = purePursuit.getCurvature() * LINSPEED; // m^-1 v_d = 0.01 m/s
+        // double right = (2*LINSPEED + ROBOT_WIDTH*omega)/2.0;
+        // double left = 2*LINSPEED - right;
+        // double omega = LINSPEED * 28.2842712; // should touch .035355339
+        double right = LINSPEED + ROBOT_WIDTH*omega/2.0;
+        double left = LINSPEED - ROBOT_WIDTH*omega/2.0;
+
+        printf("Left: %f, Right: %f, Omega: %f, curvature: %f\n", left, right, omega, purePursuit.getCurvature());
+        motorLeft.setReferenceMetersPerSec(left);
+        motorRight.setReferenceMetersPerSec(right);
+        // ESP_LOGI(TAG, "ticks: %llu", motorRight.getDistanceTicks());
+        // Odometry::updateSimpleNoImu(left, right, esp_timer_get_time());
+        Odometry::updateSimpleNoImu(motorLeft.getMotorSpeedMetersPerSec(), motorRight.getMotorSpeedMetersPerSec(), esp_timer_get_time());
+        // ESP_LOGI(TAG, "left: %f, right: %f", motorLeft.getMotorSpeedMetersPerSec(), motorRight.getMotorSpeedMetersPerSec());
+        pose = Odometry::getCurrentPose();
+
+        
+
+        vTaskDelay(50 / portTICK_PERIOD_MS); // Delay for 10 milliseconds
+    }
+    // for (const auto& point : path) {
+    //     // ESP_LOGI(TAG, "Time: %f", point.time);
+        
+    //     // ESP_LOGI(TAG, "Wheel Velocities: %f, %f", point.wheel_velocities[0], point.wheel_velocities[1]); // meters per sec
     //     // Set motor direction based on the velocity sign
-    //     motorLeft.set(point.wheel_velocities[0] / MAX_VEL);
-    //     motorRight.set(point.wheel_velocities[1] / MAX_VEL);
+    //     motorLeft.setReferenceMetersPerSec(point.wheel_velocities[0]);
+    //     motorRight.setReferenceMetersPerSec(point.wheel_velocities[1]);
         
     //     vTaskDelay(static_cast<int>(100 / portTICK_PERIOD_MS));
     // }
-    // motorRight.set(0.5);
 
-    motorRight.setReferenceRpm(8);
+}
+
+
+extern "C" void app_main() {
     
+
+    // must be in order SNTP, WiFi, MQTT bc SNTP does the NVS/eventloop stuff
+    SNTPHelper::init();
+    SNTPHelper::setTimeZone("CST6CDT,M3.2.0,M11.1.0");
+    WifiHelper::init();
+    Telemetry::init();
+    Telemetry::waitForConnection();
+    SNTPHelper::start();
+    
+    encoderLeft.attachFullQuad(34,35);
+    encoderRight.attachFullQuad(36,39);
+
+    motorLeft.setup(GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_16, LEDC_TIMER_0, LEDC_CHANNEL_0);
+    motorRight.setup(GPIO_NUM_27, GPIO_NUM_14, GPIO_NUM_4, LEDC_TIMER_1, LEDC_CHANNEL_1);
+
+
+    motorRight.addEncoder(encoderRight);
+    motorLeft.addEncoder(encoderLeft);
+    motorRight.setPIDConstants({
+        .kP = .9549297, 
+        .kI = 0.47746485, 
+        .kD = 0.0, 
+        .kS = 0.24,
+        .kV = 1.7 //.9549297
+    }); // Example PID constants
+    motorLeft.setPIDConstants({
+        .kP = .9549297, 
+        .kI = 0.47746485, 
+        .kD = 0.0, 
+        .kS = 0.3,
+        .kV = 1.7 //.9549297
+    }); // Example PID constants
+
+    // CALIBRATE KS
+    // motorLeft.set(0.0);
+    // motorRight.set(0.0);
+    // double i = 0;
+    // vTaskDelay(500/portTICK_PERIOD_MS);
+
+    // ESP_LOGI(TAG, "LEFT");
+    // while (!motorLeft.hasPower()) {
+    //     i+=0.01;
+    //     motorLeft.set(i);
+    //     ESP_LOGI(TAG, "%f", i);
+    //     vTaskDelay(500/portTICK_PERIOD_MS);
+    // }
+    // motorLeft.set(0.0);
+    // motorRight.set(0.0);
+    // i = 0;
+    // vTaskDelay(500/portTICK_PERIOD_MS);
+    // ESP_LOGI(TAG, "RIGHT");
+    // while (!motorRight.hasPower()) {
+    //     i+=0.01;
+    //     motorRight.set(i);
+    //     ESP_LOGI(TAG, "%f", i);
+    //     vTaskDelay(500/portTICK_PERIOD_MS);
+    // }
+
+    // motorLeft.setReferenceMetersPerSec(0.039490);
+    // motorRight.setReferenceRadPerSec(1.1967);
+
+    TaskHandle_t handle;
+    xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &handle);
     while (true) {
-
-        vTaskDelay(250 / portTICK_PERIOD_MS);
-
+        // ESP_LOGI(TAG, "%d", uxTaskGetStackHighWaterMark(handle));
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
-// motorRight.set(0.0);
-
-    // read_gyro = true;
-
-    // xTaskCreate(gyro_task, "gyroTask", 2048, NULL, 5, NULL);
 }
 
 // #include <stdio.h>

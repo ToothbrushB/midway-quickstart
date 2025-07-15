@@ -35,7 +35,7 @@ void SNTPHelper::print_servers(void)
 
 void SNTPHelper::time_sync_notification_cb(struct timeval *tv) // static method
 {
-    ESP_LOGI(TAG, "Notification of a time synchronization event");
+    ESP_LOGD(TAG, "Notification of a time synchronization event");
     print_current_time();
 }
 
@@ -48,7 +48,7 @@ void SNTPHelper::print_current_time() {
     time(&now);
     localtime_r(&now, &timeinfo);
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    ESP_LOGI(TAG, "Current time: %s", strftime_buf);
+    ESP_LOGD(TAG, "Current time: %s", strftime_buf);
 }
 
 // must be called before getting IP

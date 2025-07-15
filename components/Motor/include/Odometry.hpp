@@ -38,9 +38,9 @@ public:
 
     // Method to convert to a string representation
     std::string toString() const {
-        return "Pose2d(x: " + std::to_string(x) +
-               ", y: " + std::to_string(y) +
-               ", heading: " + std::to_string(heading) + ")";
+        return std::to_string(x) +
+               ", " + std::to_string(y) +
+               ", " + std::to_string(heading);
     }
 
     Pose2d exp(const Twist2d& twist) const {
@@ -72,15 +72,18 @@ protected:
 
 class Odometry {
 public:
-    Odometry();
-    void setup(double wheelRadius, double ticksPerRevolution);
-    Pose2d update(double vLeft, double vRight, double headingRad, uint64_t tt);
-    void reset(Pose2d pose = {0.0, 0.0, 0.0});
-    Pose2d getCurrentPose() const {
+    static void setup(double wheelRadius, double ticksPerRevolution);
+    static Pose2d update(double vLeft, double vRight, double headingRad, uint64_t tt);
+    static void seed(Pose2d pose);
+    static void reset(Pose2d pose = {0.0, 0.0, 0.0});
+    static Pose2d getCurrentPose() {
         return currentPose;
     }
+    static Pose2d updateSimple(double vLeft, double vRight, double headingRad, uint64_t tt);
+    static Pose2d updateSimpleNoImu(double vLeft, double vRight, uint64_t tt);
+
 protected:
-    Pose2d currentPose;
-    double lastUpdateTime;
-    double previousHeading;
+    static Pose2d currentPose;
+    static double lastUpdateTime;
+    static double previousHeading;
 };

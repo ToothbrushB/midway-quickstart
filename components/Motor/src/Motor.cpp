@@ -102,6 +102,40 @@ void Motor::publishTelemetry() {
     // ESP_LOGI(TAG, "Motor: %s, Speed: %f, Ticks: %lld, Output: %f", name, speed, distanceTicks, output);
 
 }
+PIDConfig Motor::calibrate() {
+    //calculate kS
+    set(0);
+    double i = 0;
+    while (motor_speed < 0.001) {
+        i += 0.01;
+        set(i);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+    double kS = i;
+
+    // calculate kV
+    double output[20] = {0};
+    double speed[20] = {0};
+    for (int j = 0; j < 20; ++j) {
+        output[j] = kS + j * (1 - kS) / 20.0;
+        set(output[j]);
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+        speed[j] = motor_speed;
+    } 
+
+    //perform least-squares regression to determine kV, the slope of the line predicting speed from output
+    double sumX = 0.0, sumY = 0.0, sumXY = 0.0, sumXX = 0.0;
+    for (int j = 0; j < 20; ++j) {
+        sumX += output[j];
+        sumY += speed[j];
+        sumXY += output[j] * speed[j];
+        sumXX += output[j] * output[j];
+    }
+    double kV = (20 * sumXY - sumX * sumY) / (20 * sumXX - sumX * sumX);
+
+    return PIDConfig{0.0,0.0,0.0,kS,kV};
+}
+
 
 int64_t Motor::getDistanceTicks()
 {
@@ -283,17 +317,3 @@ void Motor::stop()
     ledc_set_duty(MOTOR_PWM_MODE, channel, 0);
     ledc_update_duty(MOTOR_PWM_MODE, channel);
 }
-
-// Example usage
-/*
-extern "C" void app_main() {
-    Motor motor;
-    motor.set(true, 512); // Forward at 50% speed
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-    motor.set(false, 1023); // Reverse at 100% speed
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-    motor.brake();
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
-    motor.stop();
-}
-*/

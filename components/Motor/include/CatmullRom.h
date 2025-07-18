@@ -1,5 +1,6 @@
-#ifndef CatmullRom_h
-#define CatmullRom_h
+// Code modified from https://github.com/purwar2016/PreciseMovement-library
+
+#pragma once
 
 // CatmullRom class is for catmull rom interpolation. 
 class CatmullRom
@@ -44,7 +45,3 @@ private:
     int _iterationIndex;
     float _t;
 };
-
-
-
-#endif

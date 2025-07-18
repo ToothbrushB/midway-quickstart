@@ -1,7 +1,9 @@
 #include <cstdint>
 #include <string>
 #include <cmath>
-
+#include <esp_timer.h>
+#include <functional>
+#include <mutex>
 #pragma once
 
 class Twist2d {
@@ -72,18 +74,25 @@ protected:
 
 class Odometry {
 public:
-    static void setup(double wheelRadius, double ticksPerRevolution);
-    static Pose2d update(double vLeft, double vRight, double headingRad, uint64_t tt);
+    static void setup(std::function<double(void)> vLeft, std::function<double(void)> vRight, std::function<double(void)> heading, int periodMs);
     static void seed(Pose2d pose);
-    static void reset(Pose2d pose = {0.0, 0.0, 0.0});
     static Pose2d getCurrentPose() {
         return currentPose;
     }
-    static Pose2d updateSimple(double vLeft, double vRight, double headingRad, uint64_t tt);
-    static Pose2d updateSimpleNoImu(double vLeft, double vRight, uint64_t tt);
+
 
 protected:
+    static std::mutex poseMutex;
     static Pose2d currentPose;
     static double lastUpdateTime;
     static double previousHeading;
+    static Pose2d updateSimple(double vLeft, double vRight, double headingRad, uint64_t tt);
+    static Pose2d updateSimpleNoImu(double vLeft, double vRight, uint64_t tt);
+    static Pose2d update(double vLeft, double vRight, double headingRad, uint64_t tt);
+    static void timer();
+    static std::function<double(void)> vLeft;
+    static std::function<double(void)> vRight;
+    static std::function<double(void)> heading;
+    static esp_timer_handle_t timerHandle;
+    static double imuOffset; // Offset for IMU heading
 };

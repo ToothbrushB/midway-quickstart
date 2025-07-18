@@ -1569,8 +1569,8 @@ bool BNO08x::dynamic_calibration_run_routine()
 
                 // clang-format off
                 #ifdef CONFIG_ESP32_BNO08x_LOG_STATEMENTS
-                ESP_LOGI(TAG, "dynamic_calibration_run_routine(): quat_data: accuracy: %d i: %.3f j: %.3f k: %.3f real: %.3f",
-                        static_cast<uint8_t>(quat_data.accuracy), quat_data.i, quat_data.j, quat_data.k, quat_data.real);
+                // ESP_LOGI(TAG, "dynamic_calibration_run_routine(): quat_data: accuracy: %d i: %.3f j: %.3f k: %.3f real: %.3f",
+                //         static_cast<uint8_t>(quat_data.accuracy), quat_data.i, quat_data.j, quat_data.k, quat_data.real);
                 #endif
                 // clang-format on
             }
@@ -1587,8 +1587,8 @@ bool BNO08x::dynamic_calibration_run_routine()
 
                 // clang-format off
                 #ifdef CONFIG_ESP32_BNO08x_LOG_STATEMENTS
-                ESP_LOGI(TAG, "dynamic_calibration_run_routine(): magf_data: accuracy: %d x: %.3f y: %.3f z: %.3f ",
-                static_cast<uint8_t>(magf_data.accuracy), magf_data.x, magf_data.y, magf_data.z);
+                // ESP_LOGI(TAG, "dynamic_calibration_run_routine(): magf_data: accuracy: %d x: %.3f y: %.3f z: %.3f ",
+                // static_cast<uint8_t>(magf_data.accuracy), magf_data.x, magf_data.y, magf_data.z);
                 #endif
                 // clang-format on
             }

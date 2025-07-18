@@ -1,3 +1,4 @@
+<!-- https://github.com/myles-parfeniuk/esp32_BNO08x -->
 <a name="readme-top"></a>
 ![image](README_images/esp32_BNO08x_banner.png)
 <summary>Table of Contents</summary>

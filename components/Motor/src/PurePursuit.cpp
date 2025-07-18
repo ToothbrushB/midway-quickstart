@@ -1,3 +1,4 @@
+// Code modified from https://github.com/purwar2016/PreciseMovement-library
 
 #include "PurePursuit.hpp"
 #include "CatmullRom.h"
@@ -7,7 +8,7 @@
 
 #define PI 3.14159265358979
 
-const char* TAG = "PurePursuit";
+static const char* TAG = "PurePursuit";
 // Constructor.
 PurePursuit::PurePursuit(double LOOK_AHEAD, unsigned long INTERVAL)
 {

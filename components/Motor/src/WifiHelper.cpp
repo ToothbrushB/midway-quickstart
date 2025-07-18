@@ -47,20 +47,10 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-// get mac adderss as string
-char* WifiHelper::get_mac_string(void)
-{
-    static char mac_str[18]; // 17 characters + null terminator
-    snprintf(mac_str, sizeof(mac_str), "%02x:%02x:%02x:%02x:%02x:%02x",
-             macAddress[0], macAddress[1], macAddress[2], macAddress[3], macAddress[4], macAddress[5]);
-    return mac_str;
-}
 
 // must call SNTP init before this
 void WifiHelper::init(void)
 {
-
-    esp_wifi_get_mac(WIFI_IF_STA, macAddress);
 
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();

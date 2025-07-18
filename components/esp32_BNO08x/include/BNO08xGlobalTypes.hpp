@@ -24,6 +24,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <cstring>
+#include <string>
 
 // esp-idf includes
 #include <driver/gpio.h>
@@ -563,6 +564,12 @@ typedef struct bno08x_euler_angle_t
             z *= static_cast<float>(value);
             rad_accuracy *= static_cast<float>(value);
             return *this;
+        }
+
+        std::string toString() const
+        {
+            return "Euler Angle: (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) +
+                   "), Accuracy: " + BNO08xAccuracy_to_str(accuracy) + ", Rad Accuracy: " + std::to_string(rad_accuracy);
         }
 
 } bno08x_euler_angle_t;

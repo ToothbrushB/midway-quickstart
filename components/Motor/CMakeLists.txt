@@ -21,6 +21,7 @@ set(MOTOR_REQUIRES
     esp_wifi
     nvs_flash
     esp_event
+    esp_system
 )
 
 # Private component requirement

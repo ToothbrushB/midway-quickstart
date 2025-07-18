@@ -36,6 +36,7 @@ public:
 
     double getMotorSpeedMetersPerSec();
     bool hasPower() {return _hasPower;}
+    PIDConfig calibrate();
 
 private:
     void setInternal(double speed);

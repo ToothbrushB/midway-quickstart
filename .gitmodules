@@ -1,3 +1,6 @@
 [submodule "components/ESP32Encoder"]
 	path = components/ESP32Encoder
 	url = https://github.com/madhephaestus/ESP32Encoder.git
+[submodule "components/espp"]
+	path = components/espp
+	url = https://github.com/esp-cpp/espp

@@ -7,6 +7,11 @@
 static const char* TAG = "IMUHelper";
 BNO08x IMUHelper::imu;
 bno08x_euler_angle_t IMUHelper::euler;
+double IMUHelper::yawOffset = 0.0; // Initialize yaw offset
+void IMUHelper::resetYaw() {
+    yawOffset = IMUHelper::euler.z + yawOffset; // Reset the yaw offset to the current yaw
+    ESP_LOGI(TAG, "Yaw offset reset to: %.2f", yawOffset);
+}                            
 void IMUHelper::calibrate() {
     imu.dynamic_calibration_run_routine();
 }
@@ -16,17 +21,49 @@ void IMUHelper::init() {
     } else {
         ESP_LOGI("IMUHelper", "IMU initialized successfully");
     }
+    Telemetry::subscribe("imu/command", [](const char* topic, const char* data, int data_len) {
+        // check if data is a string
+        if (data_len <= 0) {
+            ESP_LOGW(TAG, "Received empty command for IMU");
+            return;
+        }
+        
+        // Create null-terminated string from MQTT data
+        std::string command(data, data_len);
+        
+        if (command == "calibrate") {
+            IMUHelper::calibrate();
+            ESP_LOGI(TAG, "IMU calibration started");
+        } else if (command == "tare") {
+            IMUHelper::tare();
+            ESP_LOGI(TAG, "IMU tared");
+        } else if (command == "reset_yaw") {
+            IMUHelper::resetYaw();
+            ESP_LOGI(TAG, "IMU yaw reset");
+        } else {
+            ESP_LOGW(TAG, "Unknown IMU command: '%s' (length: %d)", command.c_str(), data_len);
+        }
+    });
 
+
+    // Register telemetry callbacks for IMU data
+    Telemetry::registerPeriodicCallback([]() {
+        // Publish IMU data
+
+        Telemetry::publishData("imu/euler", IMUHelper::euler.toString());
+        
+    }, PublishFrequency::HZ_10);
 }
 void IMUHelper::tare() {
     imu.rpt.rv.tare_clear();
-    imu.rpt.rv.tare(true, true, true);
+    imu.rpt.rv_game.tare(true, true, true);
     imu.rpt.rv.tare_persist();
-    // imu.rpt.rv_game.tare(true, true, true);
     // imu.rpt.rv_geomagnetic.tare(true, true, true);
 }
 void IMUHelper::start() {
-    imu.rpt.rv.enable(100000UL); // 1,000us == 1ms report interval
+    imu.rpt.rv_game.enable(1000UL);
+    imu.rpt.rv_ARVR_stabilized.enable(1000UL);
+
     // imu.rpt.cal_gyro.enable(100000UL);
     // imu.rpt.gravity.enable(100000UL);
     // imu.rpt.accelerometer.enable(100000UL);
@@ -42,36 +79,12 @@ void IMUHelper::start() {
             {
                 switch (rpt_ID)
                 {
-                    case SH2_ROTATION_VECTOR:
-                        euler = imu.rpt.rv.get_euler(false);
-                        if (euler.rad_accuracy < 10*DEG_2_RAD) {
-                            imu.dynamic_calibration_disable(BNO08xCalSel::all);
-                        }
-                        Telemetry::publishData("imu", IMUHelper::euler.toString());
+                    case SH2_ARVR_STABILIZED_RV:
+                        euler = imu.rpt.rv_ARVR_stabilized.get_euler(false);
+                        euler.z -= IMUHelper::yawOffset; // Adjust yaw with offset
                         // ESP_LOGW(TAG, "Euler Angle: (x (roll): %.2f y (pitch): %.2f z (yaw): %.2f)[deg] accuracy: %.2f", euler.x*RAD_2_DEG, euler.y*RAD_2_DEG,
                                 // euler.z*RAD_2_DEG, euler.rad_accuracy*RAD_2_DEG);
                         break;
-
-                    // case SH2_CAL_GYRO:
-                    //     velocity = imu.rpt.cal_gyro.get();
-                    //     ESP_LOGW(TAG, "Velocity: (x: %.2f y: %.2f z: %.2f)[rad/s]", velocity.x, velocity.y, velocity.z);
-                    //     break;
-
-                    // case SH2_GRAVITY:
-                    //     grav = imu.rpt.gravity.get();
-                    //     ESP_LOGW(TAG, "Gravity: (x: %.2f y: %.2f z: %.2f)[m/s^2]", grav.x, grav.y, grav.z);
-                    //     break;
-
-                    // case SH2_ACCELEROMETER:
-                    //     ang_accel = imu.rpt.accelerometer.get();
-                    //     ESP_LOGW(TAG, "Angular Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", ang_accel.x, ang_accel.y, ang_accel.z);
-                    //     break;
-
-                    // case SH2_LINEAR_ACCELERATION:
-                    //     lin_accel = imu.rpt.accelerometer.get();
-                    //     ESP_LOGW(TAG, "Linear Accel: (x: %.2f y: %.2f z: %.2f)[m/s^2]", lin_accel.x, lin_accel.y, lin_accel.z);
-                    //     break;
-
                     default:
 
                         break;

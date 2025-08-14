@@ -79,20 +79,24 @@ public:
     static Pose2d getCurrentPose() {
         return currentPose;
     }
+    static Pose2d getCurrentPose2() {
+        return currentPose2;
+    }
 
 
 protected:
     static std::mutex poseMutex;
     static Pose2d currentPose;
+    static Pose2d currentPose2; // For the second pose
     static double lastUpdateTime;
+    static double lastUpdateTime2; // For the second pose
     static double previousHeading;
     static Pose2d updateSimple(double vLeft, double vRight, double headingRad, uint64_t tt);
     static Pose2d updateSimpleNoImu(double vLeft, double vRight, uint64_t tt);
     static Pose2d update(double vLeft, double vRight, double headingRad, uint64_t tt);
-    static void timer();
+    static void timer(void* arg);
     static std::function<double(void)> vLeft;
     static std::function<double(void)> vRight;
     static std::function<double(void)> heading;
     static esp_timer_handle_t timerHandle;
-    static double imuOffset; // Offset for IMU heading
 };

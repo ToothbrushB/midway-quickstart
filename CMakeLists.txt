@@ -5,4 +5,14 @@
 cmake_minimum_required(VERSION 3.5)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+# set(EXTRA_COMPONENT_DIRS
+#   "components/espp/components"
+# )
+# set(
+#   COMPONENTS
+#   "main esptool_py timer logger vl53l i2c"
+#   CACHE STRING
+#   "List of components to include"
+#   )
+  
 project(midway-quickstart)

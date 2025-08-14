@@ -1,6 +1,6 @@
 #include "Telemetry.hpp"
 #include "esp_crt_bundle.h"
-#include "mqtt_client.h"
+#include "mqtt5_client.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include <WifiHelper.hpp>
@@ -10,10 +10,14 @@
 #include <queue>
 #include <mutex>
 #include <inttypes.h>
+#include <sys/time.h>
+
+
 
 static const char* TAG = "Telemetry";
 esp_mqtt_client_handle_t Telemetry::client; // Static member variable definition
 bool Telemetry::isConnected = false; // Static member variable definition
+bool Telemetry::isInit = false; // Static member variable definition
 
 std::map<SubscriptionHandle, std::pair<std::string, SubscriptionCallback>> Telemetry::subscriptions;
 SubscriptionHandle Telemetry::nextHandle = 0; // Initialize static handle counter
@@ -27,6 +31,49 @@ std::queue<QueuedMessage> Telemetry::messageQueue;
 std::mutex Telemetry::queueMutex;
 TaskHandle_t Telemetry::publishTaskHandle = nullptr;
 
+// Periodic publishing static members
+std::map<PeriodicHandle, PeriodicCallbackInfo> Telemetry::periodicCallbacks;
+std::mutex Telemetry::periodicMutex;
+PeriodicHandle Telemetry::nextPeriodicHandle = 1;
+TaskHandle_t Telemetry::periodicTaskHandle = nullptr;
+bool Telemetry::periodicTaskRunning = false;
+static esp_mqtt5_user_property_item_t user_property_arr[] = {
+        {"timestamp", "0000000"},
+};
+
+#define USE_PROPERTY_ARR_SIZE   sizeof(user_property_arr)/sizeof(esp_mqtt5_user_property_item_t)
+
+static esp_mqtt5_publish_property_config_t publish_property = {
+    .payload_format_indicator = 1,
+    .message_expiry_interval = 1000,
+    .topic_alias = 0,
+    .response_topic = "",
+    .correlation_data = "",
+    .correlation_data_len = 0,
+};
+
+static void print_user_property(mqtt5_user_property_handle_t user_property)
+{
+    if (user_property) {
+        uint8_t count = esp_mqtt5_client_get_user_property_count(user_property);
+        if (count) {
+            esp_mqtt5_user_property_item_t *item = (esp_mqtt5_user_property_item_t *)malloc(count * sizeof(esp_mqtt5_user_property_item_t));
+            if (esp_mqtt5_client_get_user_property(user_property, item, &count) == ESP_OK) {
+                for (int i = 0; i < count; i ++) {
+                    esp_mqtt5_user_property_item_t *t = &item[i];
+                    ESP_LOGI(TAG, "key is %s, value is %s", t->key, t->value);
+                    free((char *)t->key);
+                    free((char *)t->value);
+                }
+            }
+            free(item);
+        }
+    }
+}
+
+/***************************
+ * Subscription management *
+****************************/
 SubscriptionHandle Telemetry::subscribe(const char* topic, SubscriptionCallback callback) {
     if (!isConnected) {
         ESP_LOGE(TAG, "Cannot subscribe - MQTT not connected");
@@ -89,15 +136,133 @@ void Telemetry::handleReceivedData(const char* topic, const char* data, int data
     }
 }
 
-void Telemetry::queueMessage(const char* topic, const char* payload, int qos) {
-    std::lock_guard<std::mutex> lock(queueMutex);
+/***************************
+ * Periodic publishing API *
+****************************/
+PeriodicHandle Telemetry::registerPeriodicCallback(PeriodicCallback callback, PublishFrequency frequency) {
+    if (!isInit) {
+        ESP_LOGE(TAG, "Telemetry not initialized, cannot register periodic callback");
+        return -1;
+    }
+    std::lock_guard<std::mutex> lock(periodicMutex);
     
+    PeriodicHandle handle = nextPeriodicHandle++;
+    
+    PeriodicCallbackInfo info;
+    info.callback = callback;
+    info.frequency = frequency;
+    info.lastExecuted = 0;
+    info.active = true;
+    
+    periodicCallbacks[handle] = info;
+    
+    ESP_LOGI(TAG, "Registered periodic callback with handle: %d, frequency: %d us", handle, (int)frequency);
+    
+    // Start periodic task if not already running
+    if (!periodicTaskRunning) {
+        startPeriodicPublishing();
+    }
+    
+    return handle;
+}
+
+bool Telemetry::unregisterPeriodicCallback(PeriodicHandle handle) {
+    std::lock_guard<std::mutex> lock(periodicMutex);
+    
+    auto it = periodicCallbacks.find(handle);
+    if (it == periodicCallbacks.end()) {
+        ESP_LOGE(TAG, "Invalid periodic handle: %d", handle);
+        return false;
+    }
+    
+    periodicCallbacks.erase(it);
+    ESP_LOGI(TAG, "Unregistered periodic callback with handle: %d", handle);
+    
+    return true;
+}
+
+void Telemetry::startPeriodicPublishing() {
+    if (!periodicTaskRunning) {
+        periodicTaskRunning = true;
+        xTaskCreate(periodicTask, "TelemetryPeriodic", 8192, NULL, 6, &periodicTaskHandle);
+        ESP_LOGI(TAG, "Periodic publishing task started");
+    }
+}
+
+void Telemetry::stopPeriodicPublishing() {
+    if (periodicTaskRunning) {
+        periodicTaskRunning = false;
+        if (periodicTaskHandle != nullptr) {
+            vTaskDelete(periodicTaskHandle);
+            periodicTaskHandle = nullptr;
+        }
+        ESP_LOGI(TAG, "Periodic publishing task stopped");
+    }
+}
+
+void Telemetry::periodicTask(void* parameter) {
+    ESP_LOGI(TAG, "Periodic publish task started");
+    
+    
+    while (periodicTaskRunning) {
+                static int log_counter = 0;
+        if (++log_counter % 100 == 0) { // Every 100 iterations
+            ESP_LOGI(TAG, "Free heap: %lu bytes, Queue size: %u", 
+                     esp_get_free_heap_size(), messageQueue.size());
+        }
+        // Process all periodic callbacks
+        std::lock_guard<std::mutex> lock(periodicMutex);
+        
+        for (auto& pair : periodicCallbacks) {
+            PeriodicCallbackInfo& info = pair.second;
+            
+            if (!info.active) {
+                continue;
+            }
+            
+            // Check if it's time to execute this callback
+            uint64_t timeSinceLastExecution = esp_timer_get_time() - info.lastExecuted;
+            
+            if (timeSinceLastExecution >= (uint64_t)info.frequency) {
+                // Execute the callback
+                info.callback();
+                info.lastExecuted = esp_timer_get_time();
+            }
+        }
+        
+        vTaskDelay(10/portTICK_PERIOD_MS); // Yield to other tasks
+    }
+    
+    ESP_LOGI(TAG, "Periodic publish task ended");
+    vTaskDelete(NULL);
+}
+
+/***************************
+ * Publish management *
+****************************/
+struct timeval tv_now;
+void Telemetry::queueMessage(const char* topic, const char* payload, int qos) {
+    if (!isConnected) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(queueMutex);
+    if (messageQueue.size() >= 100) { // Limit queue size
+        ESP_LOGW(TAG, "Message queue full (%zu messages), dropping oldest message", messageQueue.size());
+        messageQueue.pop(); // Remove oldest message
+    }
+    size_t free_heap = esp_get_free_heap_size();
+    if (free_heap < 10240) { // Less than 10KB free
+        ESP_LOGE(TAG, "Low memory (%zu bytes), dropping message", free_heap);
+        return;
+    }
     QueuedMessage message;
     message.topic = BASE_TOPIC + topic;
     message.payload = payload;
     message.qos = qos;
-    message.timestamp = esp_timer_get_time(); // Current time in microseconds
-    
+    gettimeofday(&tv_now, NULL);
+    int64_t time_us = (int64_t)tv_now.tv_sec * 1000000L + (int64_t)tv_now.tv_usec;
+    message.timestamp = time_us; // Current time in microseconds
+
     messageQueue.push(message);
     
     // Notify the publish task that there's a new message
@@ -112,26 +277,20 @@ bool Telemetry::publishMessageWithTimestamp(const QueuedMessage& message) {
     }
     
     // Create user properties for MQTT v5
-    esp_mqtt5_user_property_item_t user_property = {0};
-    user_property.key = "timestamp";
-    
+    user_property_arr[0].key = "timestamp";
+
     // Convert timestamp to string
     char timestamp_str[32];
     snprintf(timestamp_str, sizeof(timestamp_str), "%" PRIu64, message.timestamp);
-    user_property.value = timestamp_str;
-    
+    user_property_arr[0].value = timestamp_str;
+
     // Publish with user properties
-    esp_mqtt5_client_set_user_property(&user_property);
-    int msg_id = esp_mqtt_client_publish(
-        client,
-        message.topic.c_str(),
-        message.payload.c_str(),
-        message.payload.length(),
-        message.qos,
-        0, // retain
-    );
-    esp_mqtt5_client_delete_user_property(&user_property)
-    
+    esp_mqtt5_client_set_user_property(&publish_property.user_property, user_property_arr, USE_PROPERTY_ARR_SIZE);
+    esp_mqtt5_client_set_publish_property(client, &publish_property);
+    int msg_id = esp_mqtt_client_publish(client, message.topic.c_str(), message.payload.c_str(), message.payload.length(), message.qos, 0);
+    esp_mqtt5_client_delete_user_property(publish_property.user_property); // Clean up user properties
+    publish_property.user_property = NULL;
+
     if (msg_id == -1) {
         ESP_LOGE(TAG, "Failed to publish message to topic: %s", message.topic.c_str());
         return false;
@@ -180,7 +339,40 @@ void Telemetry::publishTask(void* parameter) {
         }
     }
 }
-/*
+
+void Telemetry::publishData(const char* topic, const char* payload, int qos) {
+    // Queue data for publishing with timestamp
+    queueMessage(topic, payload, qos);
+}
+
+
+void Telemetry::publishData(const char* topic, double payload, int qos) {
+    // Convert double to string and queue for publishing
+    char payload_str[32];
+    snprintf(payload_str, sizeof(payload_str), "%.2f", payload);
+    queueMessage(topic, payload_str, qos);
+}
+
+void Telemetry::publishData(const char* topic, int payload, int qos) {
+    // Convert int to string and queue for publishing
+    char payload_str[32];
+    snprintf(payload_str, sizeof(payload_str), "%d", payload);
+    queueMessage(topic, payload_str, qos);
+}
+
+void Telemetry::publishData(const char* topic, bool payload, int qos) {
+    // Convert bool to string and queue for publishing
+    const char* payload_str = payload ? "true" : "false";
+    queueMessage(topic, payload_str, qos);
+}
+
+void Telemetry::publishData(const char* topic, std::string payload, int qos) {
+    // Queue string data for publishing
+    queueMessage(topic, payload.c_str(), qos);
+}
+/******************************
+ * MQTT event handling & init *
+ ******************************
  * @brief Event handler registered to receive MQTT events
  *
  *  This function is called by the MQTT client event loop.
@@ -221,7 +413,7 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
             .callback = [](void* arg) {
                 // Check if we need to send a ping
                 if (esp_timer_get_time() - lastPingTime > 10e6) { // 10 seconds
-                    ESP_LOGE(TAG, "No ping received in the last 10 seconds.."); 
+                    ESP_LOGW(TAG, "No ping received in the last 10 seconds.."); 
                 }
             },
             .arg = NULL,
@@ -247,6 +439,9 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
         // ESP_LOGI(TAG, "MQTT_EVENT_PUBLISHED, msg_id=%d", event->msg_id);
         break;
     case MQTT_EVENT_DATA:
+        if (event->protocol_ver == MQTT_PROTOCOL_V_5) {
+            print_user_property(event->property->user_property);
+        }
         handleReceivedData(event->topic, event->data, event->data_len);
         break;
     case MQTT_EVENT_ERROR:
@@ -259,7 +454,6 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
 }
 // Must be inited after Wi-Fi is connected. 
 void Telemetry::init() {
-    esp_log_level_set("mqtt5_client", ESP_LOG_WARN); // Set MQTT client log level to WARNING to reduce verbose output
     // Initialization code
         const esp_mqtt_client_config_t mqtt_cfg = {
         .broker = {
@@ -289,14 +483,15 @@ void Telemetry::init() {
     char macString[13];
     esp_efuse_mac_get_default(mac);
     snprintf(macString, sizeof(macString), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    Telemetry::BASE_TOPIC = std::string(macString) + "/"; // Use the MAC address as the base topic
+    BASE_TOPIC = "robots/" + std::string(macString) + "/"; // Use the MAC address as the base topic
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, MQTT_EVENT_ANY, mqtt5_event_handler, NULL);
     esp_mqtt_client_start(client);
     
     // Start the publish task
-    xTaskCreate(publishTask, "TelemetryPublish", 4096, NULL, 5, &publishTaskHandle);
+    xTaskCreate(publishTask, "TelemetryPublish", 8192, NULL, 5, &publishTaskHandle);
     ESP_LOGI(TAG, "Telemetry publish task created");
+    isInit = true; // Mark Telemetry as initialized
 }
 
 
@@ -307,36 +502,3 @@ void Telemetry::waitForConnection() {
         ESP_LOGI(TAG, "Waiting for MQTT connection...");
     }
 }
-
-
-void Telemetry::publishData(const char* topic, const char* payload, int qos) {
-    // Queue data for publishing with timestamp
-    queueMessage(topic, payload, qos);
-}
-
-
-void Telemetry::publishData(const char* topic, double payload, int qos) {
-    // Convert double to string and queue for publishing
-    char payload_str[32];
-    snprintf(payload_str, sizeof(payload_str), "%.2f", payload);
-    queueMessage(topic, payload_str, qos);
-}
-
-void Telemetry::publishData(const char* topic, int payload, int qos) {
-    // Convert int to string and queue for publishing
-    char payload_str[32];
-    snprintf(payload_str, sizeof(payload_str), "%d", payload);
-    queueMessage(topic, payload_str, qos);
-}
-
-void Telemetry::publishData(const char* topic, bool payload, int qos) {
-    // Convert bool to string and queue for publishing
-    const char* payload_str = payload ? "true" : "false";
-    queueMessage(topic, payload_str, qos);
-}
-
-void Telemetry::publishData(const char* topic, std::string payload, int qos) {
-    // Queue string data for publishing
-    queueMessage(topic, payload.c_str(), qos);
-}
-

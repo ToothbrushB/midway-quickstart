@@ -7,15 +7,14 @@
 #include <esp_timer.h>
 #include <Telemetry.hpp>
 #include <string>
-
+#include "SettingsHelper.hpp"
 #define MOTOR_PWM_FREQ 1000 // 1 kHz PWM frequency
 #define MOTOR_PWM_RES LEDC_TIMER_10_BIT
 #define MOTOR_PWM_MODE LEDC_HIGH_SPEED_MODE
 
 #define Ts 1000 // usec
-#define TELEMETRY_PERIOD 500000 // usec
 #define RATIO 25317 // 44 counts per rev, 600 reduction; measured 25317 ish
-#define WHEEL_RADIUS 0.033
+double WHEEL_RADIUS = 0.033;
 #define PI 3.14159265358979
 
 //define signum function
@@ -29,7 +28,7 @@ name(name)
 }
 
 // make a method that setup the motor pwm based on the pins that are passed into the method
-void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_t timer, ledc_channel_t channel)
+void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_t timer, ledc_channel_t channel, ESP32Encoder& encoder)
 {
     this->channel = channel;
     motorIn1 = in1;
@@ -68,38 +67,72 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
             .output_invert = 0}};
     ledc_channel_config(&ledc_channel);
 
+    this->encoder = &encoder;
     esp_timer_create_args_t timer_args = {
         .callback = [](void* arg) {
             Motor* motor = static_cast<Motor*>(arg);
-            motor->publishTelemetry(); // Call the publishTelemetry method
+            motor->checkEncoder(); // Call the velocity calculation method
+            motor->calculatePID(); // Call the PID calculation method
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
-        .name = "MotorTelemetryTimer",
+        .name = "MotorVelocityTimer",
         .skip_unhandled_events = false
     };
-    esp_timer_create(&timer_args, &telemetryTimer);
-    esp_timer_start_periodic(telemetryTimer, TELEMETRY_PERIOD);
+    esp_timer_create(&timer_args, &velocityTimer);
+    esp_timer_start_periodic(velocityTimer, Ts);
+
+    SettingsHelper::addDoubleSetting(("M/" + name + "/kP").c_str(), .9549297);
+    SettingsHelper::addDoubleSetting(("M/" + name + "/kI").c_str(), .47746485);
+    SettingsHelper::addDoubleSetting(("M/" + name + "/kD").c_str(), 0.0);
+    SettingsHelper::addDoubleSetting(("M/" + name + "/kS").c_str(), 0.24);
+    SettingsHelper::addDoubleSetting(("M/" + name + "/kV").c_str(), 1.0);
+    setPIDConstants(SettingsHelper::getDoubleSetting(("M/" + name + "/kP").c_str()),
+                    SettingsHelper::getDoubleSetting(("M/" + name + "/kI").c_str()),
+                    SettingsHelper::getDoubleSetting(("M/" + name + "/kD").c_str()),
+                    SettingsHelper::getDoubleSetting(("M/" + name + "/kS").c_str()),
+                    SettingsHelper::getDoubleSetting(("M/" + name + "/kV").c_str()));
+    SettingsHelper::addDoubleSetting("wheelRadius", WHEEL_RADIUS);
+    WHEEL_RADIUS = SettingsHelper::getDoubleSetting("wheelRadius");
+    SettingsHelper::registerDoubleCallback(("M/" + name + "/kP").c_str(), [this](const std::pair<const char*, double>& setting) {
+        pidConfig.kP = setting.second;
+        ESP_LOGI(TAG, "Set kP to %f", pidConfig.kP);
+    });
+    SettingsHelper::registerDoubleCallback(("M/" + name + "/kI").c_str(), [this](const std::pair<const char*, double>& setting) {
+        pidConfig.kI = setting.second;
+        ESP_LOGI(TAG, "Set kI to %f", pidConfig.kI);
+    });
+    SettingsHelper::registerDoubleCallback(("M/" + name + "/kD").c_str(), [this](const std::pair<const char*, double>& setting) {
+        pidConfig.kD = setting.second;
+        ESP_LOGI(TAG, "Set kD to %f", pidConfig.kD);
+    });
+    SettingsHelper::registerDoubleCallback(("M/" + name + "/kS").c_str(), [this](const std::pair<const char*, double>& setting) {
+        pidConfig.kS = setting.second;
+        ESP_LOGI(TAG, "Set kS to %f", pidConfig.kS);
+    });
+    SettingsHelper::registerDoubleCallback(("M/" + name + "/kV").c_str(), [this](const std::pair<const char*, double>& setting) {
+        pidConfig.kV = setting.second;
+        ESP_LOGI(TAG, "Set kV to %f", pidConfig.kV);
+    });
+    SettingsHelper::registerDoubleCallback("wheelRadius", [this](const std::pair<const char*, double>& setting) {
+        WHEEL_RADIUS = setting.second;
+        ESP_LOGI(TAG, "Set wheel radius to %f", WHEEL_RADIUS);
+    });
+
+    Telemetry::registerPeriodicCallback([this]() {
+        publishTelemetry();
+    }, PublishFrequency::HZ_50);
 }
 
 void Motor::publishTelemetry() {
     int distanceTicks = getDistanceTicks();
 
-    // // Publish telemetry data
-    // size_t nbytes = snprintf(NULL, 0, "Speed: %f, Ticks: %lld, output: %f", speed, distanceTicks, output) + 1; /* +1 for the '\0' */
-    // char *str = (char*)malloc(nbytes);
-    // snprintf(str, nbytes, "Speed: %f, Ticks: %lld, output: %f", speed, distanceTicks, output);
+    // publish speed, distanceTicks, output, setpoint, and hasPower as json to telemetry
+    char json[256];
+    snprintf(json, sizeof(json), "{\"speed\":%f,\"ticks\":%d,\"output\":%f,\"setpoint\":%f,\"hasPower\":%s}",
+             motor_speed, distanceTicks, output, pidSetpoint, _hasPower ? "true" : "false");
+    Telemetry::publishData((name+"/telemetry").c_str(), json, 0);
 
-    // DISABLE TELEM
-    Telemetry::publishData((name+"/speed").c_str(), motor_speed);
-    Telemetry::publishData((name+"/ticks").c_str(), distanceTicks);
-    Telemetry::publishData((name+"/output").c_str(), output);
-    Telemetry::publishData((name+"/setpoint").c_str(), pidSetpoint);
-    Telemetry::publishData((name+"/hasPower").c_str(), _hasPower);
-
-    // Telemetry::publishData(name, str);
-    // free(str); // Free the allocated memory after publishing
-    // ESP_LOGI(TAG, "Motor: %s, Speed: %f, Ticks: %lld, Output: %f", name, speed, distanceTicks, output);
 
 }
 PIDConfig Motor::calibrate() {
@@ -146,7 +179,6 @@ int64_t Motor::getDistanceTicks()
     return encoder->getCount();
 }
 
-// set pid constants
 void Motor::setPIDConstants(PIDConfig pidConfig)
 {
     this->pidConfig = pidConfig;
@@ -154,6 +186,11 @@ void Motor::setPIDConstants(PIDConfig pidConfig)
     integral = 0.0;
     previousError = 0.0;
     previousTime = 0.0; // Initialize previous time
+}
+
+void Motor::setPIDConstants(double kP, double kI, double kD, double kS, double kV)
+{
+    setPIDConstants({kP, kI, kD, kS, kV});
 }
 
 void Motor::setReferenceRadPerSec(double radPerSec)
@@ -209,26 +246,6 @@ double Motor::getMotorSpeedMetersPerSec() {
     return motor_speed * WHEEL_RADIUS; // Convert rad/sec to meters/sec
 }
 
-
-
-void Motor::addEncoder(ESP32Encoder& encoder)
-{
-    this->encoder = &encoder;
-    esp_timer_create_args_t timer_args = {
-        .callback = [](void* arg) {
-            Motor* motor = static_cast<Motor*>(arg);
-            motor->checkEncoder(); // Call the velocity calculation method
-            motor->calculatePID(); // Call the PID calculation method
-        },
-        .arg = this,
-        .dispatch_method = ESP_TIMER_TASK,
-        .name = "MotorVelocityTimer",
-        .skip_unhandled_events = false
-    };
-    esp_timer_create(&timer_args, &velocityTimer);
-    esp_timer_start_periodic(velocityTimer, Ts);
-}
-
 // Calculate the PID control output
 // must be called ever loop iteration to update the motor speed
 // This function calculates the PID output based on the current encoder count and the setpoint
@@ -257,16 +274,6 @@ double Motor::calculatePID()
     // Set the motor speed based on the PID output
     setInternal(pidOutput);
 
-    // // calculator RMS error of the buffer and store in variable
-    // rmsError = 0.0;
-    // for (int j = 0; j < ERROR_BUFFER_SIZE; ++j) {
-    //     rmsError += error[j] * error[j];
-    // }
-    // rmsError = sqrt(rmsError / ERROR_BUFFER_SIZE);
-
-    // ++i;
-    // i = i % ERROR_BUFFER_SIZE; // Wrap around the error buffer index
-
     // ESP_LOGI(TAG, "PID Output: %f, Setpoint: %f, Current Speed: %f, Error: %f, dT: %f, P: %f, I: %f: D: %f", output, pidSetpoint, motor_speed, error, deltaTime, pidConfig.kP * error, pidConfig.kI * integral, pidConfig.kD * derivative);
     return pidOutput;
 }
@@ -276,7 +283,6 @@ void Motor::set(double speed)
 {
     doPid = false;
     setInternal(speed);
-    // ESP_LOGI(TAG, "Motor set to speed: %d", (int)(abs(speed)*1024));
 }
 
 void Motor::setInternal(double speed) {

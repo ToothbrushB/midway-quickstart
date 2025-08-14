@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "WifiHelper.hpp"
 #include "nvs_flash.h"
+#include "Telemetry.hpp"
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -101,23 +102,29 @@ void WifiHelper::init(void)
     ESP_ERROR_CHECK(esp_wifi_start() );
 
     ESP_LOGI(TAG, "wifi_init_sta finished.");
-
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
      * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
             WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
             pdFALSE,
             pdFALSE,
-            portMAX_DELAY);
+            20000 / portTICK_PERIOD_MS); // Wait for 20 seconds
 
     /* xEventGroupWaitBits() returns the bits before the call returned, hence we can test which event actually
      * happened. */
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
                  CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_PASSWORD);
+        Telemetry::registerPeriodicCallback([]() {
+            // Publish WiFi signal strength
+            int rssi = 0;
+            esp_wifi_sta_get_rssi(&rssi);
+            Telemetry::publishData("wifi/rssi", rssi);
+        }, PublishFrequency::HZ_1);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_PASSWORD);
+        esp_restart();
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }

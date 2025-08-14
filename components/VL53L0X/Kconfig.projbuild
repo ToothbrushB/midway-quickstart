@@ -1,0 +1,9 @@
+menu "V53L0X Sensor Configuration"
+
+    config VL53L0X_DEBUG
+        bool "Enable Debug Logging"
+        default y
+        help
+            Enable debug logging for the VL53L0X sensor.
+
+endmenu

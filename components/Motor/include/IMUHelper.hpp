@@ -11,6 +11,8 @@ public:
     static void tare();
     static double getYaw();
     static void start();
+    static void resetYaw();
 private:
     static bno08x_euler_angle_t euler;
+    static double yawOffset;
 };

@@ -1,119 +1,78 @@
+    // ESP_LOGI(TAG, "Starting main application");
+    // // make the i2c we'll use to communicate
+    // static constexpr auto i2c_port = I2C_NUM_0;
+    // static constexpr auto i2c_clock_speed = CONFIG_EXAMPLE_I2C_CLOCK_SPEED_HZ;
+    // static constexpr gpio_num_t i2c_sda = (gpio_num_t)21;
+    // static constexpr gpio_num_t i2c_scl = (gpio_num_t)22;
+    // logger.info("Creating I2C on port {} with SDA {} and SCL {}", i2c_port, i2c_sda, i2c_scl);
+    // logger.info("I2C clock speed: {} Hz", i2c_clock_speed);
+    // espp::I2c i2c({.port = i2c_port,
+    //                .sda_io_num = i2c_sda,
+    //                .scl_io_num = i2c_scl,
+    //                .sda_pullup_en = GPIO_PULLUP_ENABLE,
+    //                .scl_pullup_en = GPIO_PULLUP_ENABLE,
+    //                .clk_speed = i2c_clock_speed});
 
+    // // make the actual test object
+    // espp::Vl53l vl53l(
+    //     espp::Vl53l::Config{.device_address = espp::Vl53l::DEFAULT_ADDRESS,
+    //                         .write = std::bind(&espp::I2c::write, &i2c, std::placeholders::_1,
+    //                                            std::placeholders::_2, std::placeholders::_3),
+    //                         .read = std::bind(&espp::I2c::read, &i2c, std::placeholders::_1,
+    //                                           std::placeholders::_2, std::placeholders::_3),
+    //                         .log_level = espp::Logger::Verbosity::WARN});
 
+    // std::error_code ec;
+    // // set the timing budget to 10ms, which must be shorter than the
+    // // inter-measurement period. We'll log every 20ms so this guarantees we get
+    // // new data every time
+    // if (!vl53l.set_timing_budget_ms(10, ec)) {
+    //   logger.error("Failed to set inter measurement period: {}", ec.message());
+    //   return;
+    // }
+    // // set the inter-measurement period to 10ms, so we should be sure to get new
+    // // data each measurement
+    // if (!vl53l.set_inter_measurement_period_ms(10, ec)) {
+    //   logger.error("Failed to set inter measurement period: {}", ec.message());
+    //   return;
+    // }
+    // // tell it to start ranging
+    // if (!vl53l.start_ranging(ec)) {
+    //   logger.error("Failed to start ranging: {}", ec.message());
+    //   return;
+    // }
 
-// =========================================================================
-// // Released under the MIT License
-// // Copyright 2017-2018 Natanael Josue Rabello. All rights reserved.
-// // For the license information refer to LICENSE file in root directory.
-// // =========================================================================
+    // // make the task which will read the vl53l
+    // fmt::print("%time (s), distance (m)\n");
+    // auto read_task_fn = [&vl53l]() {
+    //   auto now = esp_timer_get_time();
+    //   static auto start = now;
+    //   float elapsed = (float)(now - start) / 1e6;
+    //   std::error_code ec;
+    //   // wait for the data to be ready
+    //   while (!vl53l.is_data_ready(ec)) {
+    //     std::this_thread::sleep_for(1ms);
+    //   }
+    //   // clear the interrupt so we can get another reading
+    //   if (!vl53l.clear_interrupt(ec)) {
+    //     logger.error("Failed to clear interrupt: {}", ec.message());
+    //     return false;
+    //   }
+    //   auto meters = vl53l.get_distance_meters(ec);
+    //   if (ec) {
+    //     logger.error("Failed to get distance: {}", ec.message());
+    //     return false;
+    //   }
+    //   fmt::print("{:.3f}, {:.3f}\n", elapsed, meters);
+    //   // we don't want to stop, so return false
+    //   return false;
+    // };
 
-// /**
-//  * @file mpu_spi.cpp
-//  * Example on how to setup MPU through SPI for basic usage.
-//  */
-
-// #include <stdint.h>
-// #include <stdio.h>
-// #include <stdlib.h>
-
-// #include "driver/gpio.h"
-// #include "driver/spi_master.h"
-// #include "esp_err.h"
-// #include "esp_log.h"
-// #include "freertos/FreeRTOS.h"
-// #include "freertos/portmacro.h"
-// #include "freertos/task.h"
-// #include "sdkconfig.h"
-
-// #include "SPIbus.hpp"
-// #include "MPU.hpp"
-// #include "MadgwickAHRS.hpp"
-// #include "mpu/math.hpp"
-// #include "mpu/types.hpp"
-
-// static const char* TAG = "example";
-
-// static constexpr int MOSI = 23;
-// static constexpr int MISO = 19;
-// static constexpr int SCLK = 18;
-// static constexpr int CS = 5;
-// static constexpr uint32_t CLOCK_SPEED = 1000000;  // up to 1MHz for all registers, and 20MHz for sensor data registers only
-
-// extern "C" void app_main() {
-//     printf("$ MPU Driver Example: MPU-SPI\n");
-//     fflush(stdout);
-
-//     spi_device_handle_t mpu_spi_handle;
-//     // Initialize SPI on HSPI host through SPIbus interface:
-//     vspi.begin(MOSI, MISO, SCLK);
-//     vspi.addDevice(0, CLOCK_SPEED, CS, &mpu_spi_handle);
-
-//     // Or directly with esp-idf API:
-//     /*
-//     spi_bus_config_t spi_config;
-//     spi_config.mosi_io_num = MOSI;
-//     spi_config.miso_io_num = MISO;
-//     spi_config.sclk_io_num = SCLK;
-//     spi_config.quadwp_io_num = -1;
-//     spi_config.quadhd_io_num = -1;
-//     spi_config.max_transfer_sz = SPI_MAX_DMA_LEN;
-//     ESP_ERROR_CHECK(spi_bus_initialize(HSPI_HOST, &spi_config, 0));
-//     spi_device_interface_config_t dev_config;
-//     dev_config.command_bits = 0;
-//     dev_config.address_bits = 8;
-//     dev_config.dummy_bits = 0;
-//     dev_config.mode = 0;
-//     dev_config.duty_cycle_pos = 128;
-//     dev_config.cs_ena_pretrans = 0; 
-//     dev_config.cs_ena_posttrans = 0;
-//     dev_config.clock_speed_hz = CLOCK_SPEED;
-//     dev_config.spics_io_num = CS;
-//     dev_config.flags = 0;
-//     dev_config.queue_size = 1;
-//     dev_config.pre_cb = NULL;
-//     dev_config.post_cb = NULL;
-//     ESP_ERROR_CHECK(spi_bus_add_device(HSPI_HOST, &dev_config, &mpu_spi_handle));
-//     */
-
-//     printf("$ Done starting vspi\n");
-//     Madgwick ahrs;
-//     MPU_t MPU;  // create a default MPU object
-//     MPU.setBus(vspi);  // set bus port, not really needed here since default is HSPI
-//     MPU.setAddr(mpu_spi_handle);  // set spi_device_handle, always needed!
-
-//     // Great! Let's verify the communication
-//     // (this also check if the connected MPU supports the implementation of chip selected in the component menu)
-//     while (esp_err_t err = MPU.testConnection()) {
-//         ESP_LOGE(TAG, "Failed to connect to the MPU, error=%#X", err);
-//         vTaskDelay(1000 / portTICK_PERIOD_MS);
-//     }
-//     ESP_LOGI(TAG, "MPU connection successful!");
-
-//     // Initialize
-//     ESP_ERROR_CHECK(MPU.initialize());  // initialize the chip and set initial configurations
-//     // Setup with your configurations
-//     ESP_ERROR_CHECK(MPU.setSampleRate(50));  // set sample rate to 50 Hz
-//     ESP_ERROR_CHECK(MPU.setGyroFullScale(mpud::GYRO_FS_500DPS));
-//     ESP_ERROR_CHECK(MPU.setAccelFullScale(mpud::ACCEL_FS_4G));
-
-//     // Reading sensor data
-//     printf("Reading sensor data:\n");
-//     mpud::raw_axes_t accelRaw;   // x, y, z axes as int16
-//     mpud::raw_axes_t gyroRaw;    // x, y, z axes as int16
-//     mpud::raw_axes_t magRaw;     // x, y, z axes as int16 (if magnetometer is present)
-//     mpud::float_axes_t accelG;   // accel axes in (g) gravity format
-//     mpud::float_axes_t gyroDPS;  // gyro axes in (DPS) º/s format
-//     while (true) {
-//         // Read
-//         // MPU.acceleration(&accelRaw);  // fetch raw data from the registers
-//         // MPU.rotation(&gyroRaw);       // fetch raw data from the registers
-//         MPU.motion(&accelRaw, &gyroRaw, &magRaw);  // read both in one shot
-//         // Convert
-//         accelG = mpud::accelGravity(accelRaw, mpud::ACCEL_FS_4G);
-//         gyroDPS = mpud::gyroDegPerSec(gyroRaw, mpud::GYRO_FS_500DPS);
-//         // Debug
-//         printf("accel: [%+6.2f %+6.2f %+6.2f ] (G) \t", accelG.x, accelG.y, accelG.z);
-//         printf("gyro: [%+7.2f %+7.2f %+7.2f ] (º/s)\n", gyroDPS[0], gyroDPS[1], gyroDPS[2]);
-//         vTaskDelay(100 / portTICK_PERIOD_MS);
-//     }
-// }
+    // espp::Timer timer({.period = 20ms,
+    //                    .callback = read_task_fn,
+    //                    .task_config =
+    //                        {
+    //                            .name = "VL53L4CX",
+    //                            .stack_size_bytes{4 * 1024},
+    //                        },
+    //                    .log_level = espp::Logger::Verbosity::INFO});

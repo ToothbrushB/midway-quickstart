@@ -10,10 +10,9 @@
 
 static const char* TAG = "PurePursuit";
 // Constructor.
-PurePursuit::PurePursuit(double LOOK_AHEAD, unsigned long INTERVAL)
+PurePursuit::PurePursuit(double LOOK_AHEAD)
 {
     _LOOK_AHEAD = LOOK_AHEAD;
-	_INTERVAL = INTERVAL;
 	_interpolationStep = DEFAULT_INTERPOLATION_STEP;
 	_stop = false;
 }
@@ -101,75 +100,67 @@ double PurePursuit::getCurvature()
 void PurePursuit::compute(double xPos, double yPos, double heading)
 {
 	
-	if (esp_timer_get_time() - _prevComputeTime > _INTERVAL)
+	CatmullRom& path = (*_path);
+
+	double phi = heading + PI / 2.0;
+	// 2, 3. Find the goal point.
+	computeNextGoalPoint(xPos, yPos);
+
+
+	// 4. Transform the goal point to vehicle coordinates.
+	// First translate it such that the origin is the robot.
+	float xGoalTranslated = _goalX - xPos;
+	float yGoalTranslated = _goalY - yPos;
+	// Second rotate the coordinate system such that the wheel axle points to the x-axis.
+	double xGoalRelRobot = xGoalTranslated * cos(phi) + yGoalTranslated * sin(phi);
+
+	// 5. Calculate the curvature.
+	_curvature = 2 * xGoalRelRobot / _LOOK_AHEAD / _LOOK_AHEAD;
+
+	// 6. Update the vehicle's position.
+	// Vehicle's position is updated using dead reckoning at set interval.
+
+	// printf("%f,%f,%f,%f,%f,%f,%f,%llu\n", xPos, yPos, heading, _goalX, _goalY, xGoalRelRobot, _curvature, esp_timer_get_time());
+	// Print debug info
+	// Serial.print("c: "); Serial.print(_curvature);
+	// Serial.print(", xPos: "); Serial.print(xPos);
+	// Serial.print(", yPos: "); Serial.print(yPos);
+	// Serial.print(", xGoal: "); Serial.print(_goalX);
+	// Serial.print(", yGoal: "); Serial.println(_goalY);
+
+	// Serial.print(_goalX); Serial.print("\t");
+	// Serial.println(_goalY);
+
+	// 7. Check for stop condition
+	if (!path.hasNext())
 	{
-		CatmullRom& path = (*_path);
-
-		// 1. Get the current location of the vehicle.
-
-		double phi = heading + PI / 2.0;
-		// 2, 3. Find the goal point.
-		computeNextGoalPoint(xPos, yPos);
-
-
-		// 4. Transform the goal point to vehicle coordinates.
-		// First translate it such that the origin is the robot.
-		float xGoalTranslated = _goalX - xPos;
-		float yGoalTranslated = _goalY - yPos;
-		// Second rotate the coordinate system such that the wheel axle points to the x-axis.
-		double xGoalRelRobot = xGoalTranslated * cos(phi) + yGoalTranslated * sin(phi);
-
-		// 5. Calculate the curvature.
-		_curvature = 2 * xGoalRelRobot / _LOOK_AHEAD / _LOOK_AHEAD;
-
-		// double radius = 1 / curvature;
-
-		// 6. Update the vehicle's position.
-		// Vehicle's position is updated using dead reckoning at set interval.
-
-		// printf("%f,%f,%f,%f,%f,%f,%f,%llu\n", xPos, yPos, heading, _goalX, _goalY, xGoalRelRobot, _curvature, esp_timer_get_time());
-		// Print debug info
-		// Serial.print("c: "); Serial.print(_curvature);
-		// Serial.print(", xPos: "); Serial.print(xPos);
-		// Serial.print(", yPos: "); Serial.print(yPos);
-		// Serial.print(", xGoal: "); Serial.print(_goalX);
-		// Serial.print(", yGoal: "); Serial.println(_goalY);
-
-		// Serial.print(_goalX); Serial.print("\t");
-		// Serial.println(_goalY);
-
-		// 7. Check for stop condition
-		if (!path.hasNext())
+		// Check for stoping condition
+		int length = path.getLength();
+		float p0x = path.getX(length - 2);
+		float p0y = path.getY(length - 2);
+		float p1x = path.getX(length - 1);
+		float p1y = path.getY(length - 1);
+		float p2x = xPos;
+		float p2y = yPos;
+		float phi1 = atan2(p1y - p0y, p1x - p0x);
+		float phi2 = atan2(p2y - p1y, p2x - p1x);
+		float theta = fabs(phi2 - phi1);
+		if (theta < PI/2 || theta > 3*PI/2)
 		{
-			// Check for stoping condition
-			int length = path.getLength();
-			float p0x = path.getX(length - 2);
-			float p0y = path.getY(length - 2);
-			float p1x = path.getX(length - 1);
-			float p1y = path.getY(length - 1);
-			float p2x = xPos;
-			float p2y = yPos;
-			float phi1 = atan2(p1y - p0y, p1x - p0x);
-			float phi2 = atan2(p2y - p1y, p2x - p1x);
-			float theta = fabs(phi2 - phi1);
-			if (theta < PI/2 || theta > 3*PI/2)
-			{
-				// Serial.println("STOP TRUE");
-				// Serial.print(p0x); Serial.print("\t");
-				// Serial.print(p0y); Serial.print("\t");
-				// Serial.print(p1x); Serial.print("\t");
-				// Serial.print(p1y); Serial.print("\t");
-				// Serial.print(p2x); Serial.print("\t");
-				// Serial.print(p2y); Serial.print("\t");
-				// Serial.print(phi1); Serial.print("\t");
-				// Serial.print(phi2); Serial.print("\t");
-				// Serial.println(theta);
-				_stop = true;
-			}
+			// Serial.println("STOP TRUE");
+			// Serial.print(p0x); Serial.print("\t");
+			// Serial.print(p0y); Serial.print("\t");
+			// Serial.print(p1x); Serial.print("\t");
+			// Serial.print(p1y); Serial.print("\t");
+			// Serial.print(p2x); Serial.print("\t");
+			// Serial.print(p2y); Serial.print("\t");
+			// Serial.print(phi1); Serial.print("\t");
+			// Serial.print(phi2); Serial.print("\t");
+			// Serial.println(theta);
+			_stop = true;
 		}
-
-		_prevComputeTime = esp_timer_get_time();
 	}
+
 }
 
 // Set the path for the path follower to follow. 
@@ -233,80 +224,3 @@ void PurePursuit::setInterpolationStep(float interpolationStep)
 {
 	_interpolationStep = interpolationStep;
 }
-
-// Print the path neatly. 
-// void PurePursuit::printPath()
-// {
-// 	(*_path).printPath();
-// }
-
-
-/*
-void PreMo::startPathFollowing(float* pathX, float* pathY, int pathLength, bool isForward, bool setLocation)
-{
-	// Set starting position to first path location point with robot pointing towards the next point.
-	double x0 = pathX[0];
-	double y0 = pathY[0];
-	double x1 = pathX[1];
-	double y1 = pathY[1];
-
-	double heading = atan2(y1 - y0, x1 - x0);
-
-	// Serial.print("x0: "); Serial.print(x0);
-	// Serial.print("\ty0: "); Serial.print(y0);
-	// Serial.print("\tx1: "); Serial.print(x1);
-	// Serial.print("\ty1: "); Serial.print(y1);
-	// Serial.print("\theading: "); Serial.println(heading);
-
-	// Set the location to the initial coordinates.
-	DeadReckoner& dr = (*_deadReckoner);
-	// Set the heading to the angle of the vector from the first to the second point.
-	heading = isForward ? heading : heading + PI;
-
-	if (setLocation)
-	{
-		// Set the starting location as the first path point.
-		dr.setX(x0);
-		dr.setY(y0);
-
-		// Set the heading such that the robot points to the initial direction that the path will follow.
-		dr.setHeading(heading);
-	}
-
-	(*_purePursuit).setPath(pathX, pathY, pathLength);
-	// (*_purePursuit).printPath();
-
-	_moveReverse = !isForward;
-	_isFollowingPath = true;
-	(*_purePursuit).start();
-	
-	// TODO Remove
-	// double x = dr.getX();
-	// double y = dr.getY();
-	// double t = dr.getHeading();
-	// Serial.println("DEAD RECKONER SET");
-	// Serial.print("x: "); Serial.print(x);
-	// Serial.print(", y: "); Serial.print(y);
-	// Serial.print(", t: "); Serial.println(t);
-}
-
-void PreMo::continuePathFollowing()
-{
-	// Pure pursuit
-	(*_purePursuit).compute();
-
-	// Compute PID
-	_input = (*_purePursuit).getCurvature();
-	(*_pid).Compute();
-
-	// Move the robot
-	// Serial.print("output: "); Serial.println(_output);
-	moveMotors(_motorSpeed, _output);
-
-	if ((*_purePursuit).checkStop())
-	{
-		_isFollowingPath = false;
-		stop();
-	}
-}
-*/

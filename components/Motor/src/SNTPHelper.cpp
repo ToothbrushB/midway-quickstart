@@ -8,6 +8,7 @@
 #include "esp_event.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
+#include <SettingsHelper.hpp>
 
 
 static const char* TAG = "SNTPHelper";
@@ -35,8 +36,16 @@ void SNTPHelper::print_servers(void)
 
 void SNTPHelper::time_sync_notification_cb(struct timeval *tv) // static method
 {
-    ESP_LOGD(TAG, "Notification of a time synchronization event");
-    print_current_time();
+    // Print current time code
+    time_t now;
+    struct tm timeinfo;
+    char strftime_buf[64];
+
+    time(&now);
+    localtime_r(&now, &timeinfo);
+    strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
+    ESP_LOGD(TAG, "Time synchronization event. Current time: %s", strftime_buf);
+    // print_current_time();
 }
 
 void SNTPHelper::print_current_time() {
@@ -48,7 +57,7 @@ void SNTPHelper::print_current_time() {
     time(&now);
     localtime_r(&now, &timeinfo);
     strftime(strftime_buf, sizeof(strftime_buf), "%c", &timeinfo);
-    ESP_LOGD(TAG, "Current time: %s", strftime_buf);
+    ESP_LOGI(TAG, "Current time: %s", strftime_buf);
 }
 
 // must be called before getting IP
@@ -64,9 +73,13 @@ void SNTPHelper::init() {
      * otherwise NTP option would be rejected by default.
      */
     ESP_LOGI(TAG, "Initializing SNTP");
-    ESP_ERROR_CHECK( nvs_flash_init() );
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK( esp_event_loop_create_default() );
+
+    SettingsHelper::addStringSetting("timezone", static_cast<std::string>("CST6CDT,M3.2.0,M11.1.0"));
+    SettingsHelper::registerStringCallback("timezone", [](const std::pair<const char*, std::string>& setting) {
+        SNTPHelper::setTimeZone(setting.second.c_str());
+    });
+    setTimeZone(SettingsHelper::getStringSetting("timezone").c_str());
+
     esp_sntp_config_t config = {
         .smooth_sync = false, // smooth sync is not needed for this example
         .server_from_dhcp = true, // accept NTP offers from DHCP server

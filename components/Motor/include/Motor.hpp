@@ -23,15 +23,15 @@ public:
     void set(double speed);
     void brake();
     void stop();
-    void setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwm, ledc_timer_t timer, ledc_channel_t channel);
+    void setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwm, ledc_timer_t timer, ledc_channel_t channel, ESP32Encoder& encoder);
     int64_t getDistanceTicks();
     void setPIDConstants(PIDConfig pidConfig);
+    void setPIDConstants(double kP, double kI, double kD, double kS, double kV);
+
     void setReferenceRadPerSec(double radPerSec);
     void setReferenceRpm(double rpm);
     void setReferenceMetersPerSec(double metersPerSec);
     double calculatePID();
-    void setupMath(double wheelRadius, double ticksPerRevolution);
-    void addEncoder(ESP32Encoder& encoder);
     double getMotorSpeed();
 
     double getMotorSpeedMetersPerSec();
@@ -72,7 +72,6 @@ private:
     double output = 0;
     // double rmsError = 0.0; // Root Mean Square error for PID
 
-    esp_timer_handle_t telemetryTimer;  // Timer for telemetry publishing
     esp_timer_handle_t velocityTimer;   // Timer for velocity calculation
 
     bool _hasPower = true;

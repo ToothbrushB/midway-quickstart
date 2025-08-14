@@ -13,7 +13,17 @@
 
 
 typedef std::function<void(const char* topic, const char* data, int data_len)> SubscriptionCallback;
+typedef std::function<void()> PeriodicCallback;
 typedef int SubscriptionHandle;
+typedef int PeriodicHandle;
+
+// Enum for periodic frequencies
+enum class PublishFrequency {
+    HZ_1 = 1000000,   // 1Hz in microseconds
+    HZ_10 = 100000,   // 100ms in microseconds
+    HZ_50 = 20000,    // 20ms in microseconds  
+    HZ_100 = 10000    // 10ms in microseconds
+};
 
 // Structure for queued messages
 struct QueuedMessage {
@@ -21,6 +31,14 @@ struct QueuedMessage {
     std::string payload;
     int qos;
     uint64_t timestamp; // When the message was queued
+};
+
+// Structure for periodic callbacks
+struct PeriodicCallbackInfo {
+    PeriodicCallback callback;
+    PublishFrequency frequency;
+    uint64_t lastExecuted;
+    bool active;
 };
 
 class Telemetry 
@@ -36,9 +54,17 @@ public:
 
     static SubscriptionHandle subscribe(const char* topic, SubscriptionCallback callback);
     static bool unsubscribe(SubscriptionHandle handle);
+    
+    // Periodic publishing API
+    static PeriodicHandle registerPeriodicCallback(PeriodicCallback callback, PublishFrequency frequency);
+    static bool unregisterPeriodicCallback(PeriodicHandle handle);
+    static void startPeriodicPublishing();
+    static void stopPeriodicPublishing();
 private:
     static esp_mqtt_client_handle_t client;
     static bool isConnected;
+    static bool isInit;
+
     static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
     static std::string BASE_TOPIC; // Base topic for MQTT messages
     static std::map<SubscriptionHandle, std::pair<std::string, SubscriptionCallback>> subscriptions;
@@ -55,4 +81,12 @@ private:
     static void publishTask(void* parameter);
     static void queueMessage(const char* topic, const char* payload, int qos);
     static bool publishMessageWithTimestamp(const QueuedMessage& message);
+    
+    // Periodic publishing members
+    static std::map<PeriodicHandle, PeriodicCallbackInfo> periodicCallbacks;
+    static std::mutex periodicMutex;
+    static PeriodicHandle nextPeriodicHandle;
+    static TaskHandle_t periodicTaskHandle;
+    static bool periodicTaskRunning;
+    static void periodicTask(void* parameter);
 };

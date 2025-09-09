@@ -17,10 +17,10 @@ public:
     double getDtheta() const { return dtheta; }
 
     // Method to convert to a string representation
-    std::string toString() const {
-        return "Twist2d(dx: " + std::to_string(dx) +
-               ", dy: " + std::to_string(dy) +
-               ", dtheta: " + std::to_string(dtheta) + ")";
+    char* toString() const {
+        char* buf = new char[128];
+        snprintf(buf, 128, "{\"dx\": %.6f, \"dy\": %.6f, \"dtheta\": %.6f}", dx, dy, dtheta);
+        return buf;
     }
 protected:
     double dx;       // Change in X coordinate in cm
@@ -39,10 +39,10 @@ public:
     double getHeading() const { return heading; }
 
     // Method to convert to a string representation
-    std::string toString() const {
-        return std::to_string(x) +
-               ", " + std::to_string(y) +
-               ", " + std::to_string(heading);
+    char* toString() const {
+        char* buf = new char[96];
+        snprintf(buf, 96, "{\"x\":%.6f,\"y\":%.6f,\"heading\":%.6f}", x, y, heading);
+        return buf;
     }
 
     Pose2d exp(const Twist2d& twist) const {

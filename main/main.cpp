@@ -42,7 +42,6 @@
 // #include "timer.hpp"
 // #include "vl53l.hpp"
 #include "TCS34725.hpp"
-#include "LedStripHelper.hpp"
 #include "VL53L0X.hpp"
 #include "LED.hpp"
 
@@ -67,20 +66,26 @@ enum class State
 std::map<int, float> speedChanges;
 float xPoses[200];
 float yPoses[200];
+
 ESP32Encoder encoderLeft;
 ESP32Encoder encoderRight;
 
-Motor motorLeft = Motor("LeftMotor");
-Motor motorRight = Motor("RightMotor");
+Motor motorLeft = Motor("left");
+Motor motorRight = Motor("right");
 
 VL53L0X sensorLeft;
 VL53L0X sensorRight;
+
+    LED led;
+
+
+State state = State::IDLE;
 
 static void runTheRobot(void *pvParameters)
 {
     double yaw = IMUHelper::getYaw();
     std::map<double, std::pair<double, double>> distanceMap;
-    State state = State::ACTIVE_MOVING;
+
     switch (state)
     {
     case State::ACTIVE_MOVING:
@@ -138,7 +143,7 @@ static void runTheRobot(void *pvParameters)
         motorLeft.setReferenceMetersPerSec(0);
         motorRight.setReferenceMetersPerSec(0);
         // send message to the server requesting a reroute
-        Telemetry::publishData("reroute_request", "true");
+        Telemetry::publishData("reroute_request", "{\"reroute\": true}");
         // Wait for a response from the server
         while (state == State::OBSTRUCTED_REROUTING)
         {
@@ -197,6 +202,31 @@ static void runTheRobot(void *pvParameters)
     // }
 }
 
+
+
+void do_led(void *pvParameters) {
+    int red[] = {100,230,25,30,30,50, 50, 100, 255, 255, 255, 255};
+    int green[] = {100,100,15,10,30,15, 20, 20, 165, 0, 25, 50};
+    int blue[] = {100,200,40,20,30,30, 80, 20, 50, 0, 0, 0};
+    
+    while (true) {
+
+        // pick a random color from the above arrays
+        int index = rand() % 6;
+        led.set_color_rgb(red[index], green[index], blue[index]);
+        ESP_LOGI(TAG, "LED ON%d R:%d G:%d B:%d", index, red[index], green[index], blue[index]);
+
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // ESP_LOGI(TAG, "yaw: %.2f", IMUHelper::getYaw(true));
+
+        led.set_color_rgb(0, 0, 0);
+        ESP_LOGI(TAG, "LED OFF");
+
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+    }
+}
+
+
 extern "C" void app_main()
 {
 
@@ -212,51 +242,28 @@ extern "C" void app_main()
     // SNTPHelper::print_current_time();
     // Telemetry::waitForConnection();
 
-    LED led;
     led.init();
-    led.set_color_rgb(0, 255, 0); // Green to indicate system is starting
-
-    // Use ledc to control an LED connected to GPIO 33
-    // ledc_timer_config_t ledc_timer = {
-    //     .speed_mode = LEDC_HIGH_SPEED_MODE, // Use high speed mode
-    //     .duty_resolution = LEDC_TIMER_13_BIT, // St duty resolution to 13 bits
-    //     .timer_num = LEDC_TIMER_0, // Use timer 0
-    //     .freq_hz = 5000, // Set frequency to 5 kHz
-    //     .clk_cfg = LEDC_AUTO_CLK,
-    //     .deconfigure = false
-    // };
-    // ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-    // ledc_channel_config_t ledc_channel = {
-    //     .gpio_num = GPIO_NUM_33, // Connect to GPIO 33
-    //     .speed_mode = LEDC_HIGH_SPEED_MODE, // Use high speed mode
-    //     .channel = LEDC_CHANNEL_0, // Use channel 0
-    //     .intr_type = LEDC_INTR_DISABLE,
-    //     .timer_sel = LEDC_TIMER_0, // Use timer 0
-    //     .duty = 0, // Set initial duty to 0
-    //     .hpoint = 0,
-    //     .sleep_mode = LEDC_SLEEP_MODE_KEEP_ALIVE,
-    //     .flags = {
-    //         .output_invert = 0
-    //     }
-    // };
-    // ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-    // ESP_LOGI(TAG, "=== Robot Initialization ===");
-    // // set LED d to 50% duty cycle
-    // ESP_ERROR_CHECK(ledc_set_duty(ledc_channel.speed_mode, ledc_channel.channel, 6454)); // 50% duty cycle for 13-bit resolution
-    // ESP_ERROR_CHECK(ledc_update_duty(ledc_channel.speed_mode, ledc_channel.channel)); // 6454 ~= 2.6 // 5461 ~= 2.2
+    IMUHelper::init();
+    IMUHelper::start();
 
     encoderLeft.attachFullQuad(34, 35);
     encoderRight.attachFullQuad(36, 39);
+
+
     motorLeft.setup(GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_16, LEDC_TIMER_0, LEDC_CHANNEL_0, encoderLeft);
     motorRight.setup(GPIO_NUM_27, GPIO_NUM_14, GPIO_NUM_4, LEDC_TIMER_0, LEDC_CHANNEL_1, encoderRight);
-    // SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
-    // ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
-    // SettingsHelper::registerDoubleCallback("robotWidth", [](const std::pair<const char *, double> &setting)
-                                        //    {
-        // ROBOT_WIDTH = setting.second;
-        // ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
-    // motorLeft.set(0.5);
-    // motorRight.set(0.5);                                    
+    motorLeft.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
+    motorRight.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
+    motorLeft.setReferenceMetersPerSec(0.02);
+    motorRight.setReferenceMetersPerSec(0.02);
+
+    SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
+    ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
+    SettingsHelper::registerDoubleCallback("robotWidth", [](const std::pair<const char *, double> &setting)
+                                           {
+        ROBOT_WIDTH = setting.second;
+        ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
+                                  
     // sensorLeft.config(I2C_NUM_0, 22, 21, 18, 0x29, 0);
     // sensorRight.config(I2C_NUM_0, 22, 21, 19, 0x29, 0);
 
@@ -273,11 +280,6 @@ extern "C" void app_main()
     // sensorLeft.setTimeout(500);                    // 500ms timeout
     // sensorLeft.setSignalRateLimit(0.1f);           // Lower signal rate limit for longer range
     // sensorLeft.setMeasurementTimingBudget(200000); // 200ms timing budget
-
-    // ESP_LOGI(TAG, "VL53L0X sensor configured successfully");
-    // ESP_LOGI(TAG, "Sensor address: 0x%02X", sensorLeft.getAddress());
-    // ESP_LOGI(TAG, "Timing budget: %lu us", sensorLeft.getMeasurementTimingBudget());
-    // ESP_LOGI(TAG, "Signal rate limit: %.2f MCPS", sensorLeft.getSignalRateLimit());
     // sensorLeft.startContinuous(100);
     // sensorRight.startContinuous(100);
     // ESP_LOGI(TAG, "Started continuous measurements (100ms period)");
@@ -298,53 +300,147 @@ extern "C" void app_main()
     // //     // IMUHelper::start();
     // //     printf("1\n");
 
-    // Odometry::setup(
-    //     []()
-    //     { return motorLeft.getMotorSpeedMetersPerSec(); },
-    //     []()
-    //     { return motorRight.getMotorSpeedMetersPerSec(); },
-    //     []()
-    //     { return IMUHelper::getYaw(); }, // Get yaw from IMU
-    //     50                               // Update period in milliseconds
-    // );
-    // SubscriptionHandle handle = Telemetry::subscribe("set_path", [](const char *topic, const char *data, int data_len)
-    //                                                  {
-    //     ESP_LOGI(TAG, "Received path data: %s", data);
-    //     // Parse the path data and set it in PurePursuit
-    //     std::vector<float> xPoses;
-    //     std::vector<float> yPoses;
-    //     std::istringstream ss(data);
-    //     std::string token;
-    //     while (std::getline(ss, token, '\n')) {
-    //         // Split the token based on delimiter comma
-    //         std::istringstream tokenStream(token);
-    //         std::string xStr, yStr, speedStr;
-    //         if (std::getline(tokenStream, xStr, ',') && std::getline(tokenStream, yStr, ',')) {
-    //             xPoses.push_back(std::stof(xStr));
-    //             yPoses.push_back(std::stof(yStr));
-    //             ESP_LOGI(TAG, "Parsed pose: (%f, %f)", std::stof(xStr), std::stof(yStr));
-    //         }
-    //         if (std::getline(tokenStream, speedStr, ',')) {
-    //             speedChanges.insert({xPoses.size() - 1, std::stof(speedStr)});
-    //             ESP_LOGI(TAG, "Parsed speed: %f", std::stof(speedStr));
-    //         }
-    //     } });
+    Odometry::setup(
+        []()
+        { return motorLeft.getMotorSpeedMetersPerSec(); },
+        []()
+        { return motorRight.getMotorSpeedMetersPerSec(); },
+        []()
+        { return IMUHelper::getYaw(); }, // Get yaw from IMU
+        50                               // Update period in milliseconds
+    );
+        SubscriptionHandle handleCommand2 = Telemetry::subscribe("ledcolor", [](const char *topic, const char *data, int data_len) {
+        ESP_LOGI(TAG, "Received LED color command: %.*s", data_len, data);
+        // Parse the color from the command
+        int r = 0, g = 0, b = 0;
+        sscanf(data, "[%d, %d, %d]", &r, &g, &b);
+        led.set_color_rgb(r, g, b);
+    });
 
-    // SubscriptionHandle handleStart = Telemetry::subscribe("start", [](const char *topic, const char *data, int data_len)
-    //                                                       {
-    //     TaskHandle_t robotHandle;
-    //     xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle); });
+    // PurePursuit purePursuit = PurePursuit(0.05); // Look ahead distance
+        // purePursuit.setPath(xPoses, yPoses, 200);
+        // purePursuit.start();
 
-    // motorRight.set(1);
-    // motorLeft.set(1);
-    // while (1) {
-    //   double r = motorRight.getMotorSpeed();
-    //   double l = motorLeft.getMotorSpeed();
-    //   printf("Motor Right Speed: %f, Motor Left Speed: %f\n", r, l);
-    //   vTaskDelay(1000 / portTICK_PERIOD_MS);
-    // }
+        Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()})); // Seed the odometry with a starting pose
 
-    // ESP_LOGI(TAG, "=== Single VL53L0X Sensor Example ===");
+        TaskHandle_t ledHandle;
+        xTaskCreate(do_led, "do_led", 4096, NULL, 1, &ledHandle);
+        Pose2d pose;
+        // while (!purePursuit.checkStop())
+        ESP_LOGI(TAG, "STARTING");
+
+        motorLeft.testDirection();
+        motorRight.testDirection();
+        SettingsHelper::applySettings();
+        while (true)
+        {
+            pose = Odometry::getCurrentPose();
+            // purePursuit.compute(pose.getX(),
+            //                     pose.getY(),
+            //                     pose.getHeading());
+            double omega = LINSPEED / 1;
+            // double omega = purePursuit.getCurvature() * LINSPEED; // m^-1 v_d = 0.01 m/s
+            double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
+            double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
+
+            // printf("Left: %f, Right: %f, Omega: %f\n", left, right, omega);
+            motorLeft.setReferenceMetersPerSec(left);
+            motorRight.setReferenceMetersPerSec(right);
+
+            double speedRight = motorRight.getMotorSpeedMetersPerSec();
+            double speedLeft = motorLeft.getMotorSpeedMetersPerSec();
+
+            printf("leftset: %f, rightset: %f, left: %f, right: %f\n", left, right, speedLeft, speedRight);
+            vTaskDelay(300 / portTICK_PERIOD_MS);
+        }
+
+
+    SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
+    {
+        ESP_LOGI(TAG, "Received command: %.*s", data_len, data);
+        // Handle the command
+        if (strncmp(data, "start", data_len) == 0)
+        {
+            ESP_LOGI(TAG, "Starting the robot");
+            TaskHandle_t robotHandle;
+            xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
+            state = State::ACTIVE_MOVING;
+        }
+        else if (strncmp(data, "stop", data_len) == 0)
+        {
+            ESP_LOGI(TAG, "Stopping the robot");
+            motorLeft.setReferenceMetersPerSec(0);
+            motorRight.setReferenceMetersPerSec(0);
+            state = State::IDLE;
+        }
+        else if (strncmp(data, "reset_odometry", data_len) == 0)
+        {
+            ESP_LOGI(TAG, "Resetting odometry");
+            Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()}));
+        }
+        else if (strncmp(data, "load_path", 9) == 0)
+        {
+            ESP_LOGI(TAG, "Loading path");
+            // Load the path data
+            // command should be structured like "load_path, x[1, 2, 5, 3...], y[1, 2, 3, 1...]"
+            for (int i = 11; i < data_len; i++)
+            {
+                if (data[i] == 'x' && data[i + 1] == '[')
+                {
+                    i += 2;
+                    int j = 0;
+                    while (data[i] != ']' && i < data_len)
+                    {
+                        xPoses[j++] = atof(&data[i]);
+                        while (data[i] != ',' && data[i] != ']' && i < data_len) {
+                            i++;
+                        }
+                    }
+                }
+                else if (data[i] == 'y' && data[i + 1] == '[')
+                {
+                    i += 2;
+                    int j = 0;
+                    while (data[i] != ']' && i < data_len)
+                    {
+                        yPoses[j++] = atof(&data[i]);
+                        while (data[i] != ',' && data[i] != ']' && i < data_len) {
+                            i++;
+                        }
+                    }
+                }
+            }
+        }
+        else if (strncmp(data, "blink_pattern", 13) == 0)
+        {
+            std::vector<Color> colors;
+
+            ESP_LOGI(TAG, "Loading blink pattern");
+            // Load the blink pattern data
+            // command should be structured like "blink_pattern, [128, 255, 0], [1, 2, 48], [89, 89, 89]..."
+            for (int i = 15; i < data_len; i++)
+            {
+                if (data[i] == '[')
+                {
+                    i++;
+                    int j = 0;  
+                    if (i < data_len) // could run into out of bounds error if not formatted correctly
+                    {
+                        int r = 0, g = 0, b = 0;
+                        sscanf(&data[i], "[%d, %d, %d]", &r, &g, &b);
+                        colors.push_back(Color{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+                    }
+                }
+            }
+            led.change_blink_pattern(colors);
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Unknown command: %.*s", data_len, data);
+        }
+    });
+
+
 
     // Create VL53L0X instance
     // VL53L0X sensor;
@@ -352,17 +448,6 @@ extern "C" void app_main()
     // colorSensor.init(I2C_NUM_0);
     // Configure the sensor on I2C port 0, SCL=GPIO22, SDA=GPIO21
 
-    //       HSVColor hsv = LedStripHelper::rgb2hsv({static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
-    //       if (distance < 400) {
-    //         LedStripHelper::set_color_hsv(hsv.hue, hsv.saturation, hsv.value/(400-distance));
-    //       }
-    //       else {
-    //         LedStripHelper::off();
-    //       }
-    //         printf("Distance: %d mm\tDistance2: %d mm\n", distance, distance2);
 
-    //         vTaskDelay(pdMS_TO_TICKS(100));
-    //     }
 
-    // ESP_LOGI(TAG, "Single sensor example completed");
 }

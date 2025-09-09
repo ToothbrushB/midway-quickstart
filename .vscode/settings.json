@@ -82,6 +82,19 @@
     "thread": "cpp",
     "cinttypes": "cpp",
     "typeinfo": "cpp",
-    "variant": "cpp"
+    "variant": "cpp",
+    "any": "cpp",
+    "cfenv": "cpp",
+    "codecvt": "cpp",
+    "coroutine": "cpp",
+    "csignal": "cpp",
+    "forward_list": "cpp",
+    "unordered_set": "cpp",
+    "expected": "cpp",
+    "source_location": "cpp",
+    "ranges": "cpp",
+    "scoped_allocator": "cpp",
+    "typeindex": "cpp",
+    "valarray": "cpp"
   }
 }

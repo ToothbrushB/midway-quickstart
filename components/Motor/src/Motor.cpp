@@ -22,8 +22,7 @@ double WHEEL_RADIUS = 0.033;
 
 // setup tag for esp logging
 static const char* TAG = "Motor";
-Motor::Motor(std::string name):
-name(name)
+Motor::Motor(char* name): name(name)
 {
 }
 
@@ -82,35 +81,62 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
     esp_timer_create(&timer_args, &velocityTimer);
     esp_timer_start_periodic(velocityTimer, Ts);
 
-    SettingsHelper::addDoubleSetting(("M/" + name + "/kP").c_str(), .9549297);
-    SettingsHelper::addDoubleSetting(("M/" + name + "/kI").c_str(), .47746485);
-    SettingsHelper::addDoubleSetting(("M/" + name + "/kD").c_str(), 0.0);
-    SettingsHelper::addDoubleSetting(("M/" + name + "/kS").c_str(), 0.24);
-    SettingsHelper::addDoubleSetting(("M/" + name + "/kV").c_str(), 1.0);
-    setPIDConstants(SettingsHelper::getDoubleSetting(("M/" + name + "/kP").c_str()),
-                    SettingsHelper::getDoubleSetting(("M/" + name + "/kI").c_str()),
-                    SettingsHelper::getDoubleSetting(("M/" + name + "/kD").c_str()),
-                    SettingsHelper::getDoubleSetting(("M/" + name + "/kS").c_str()),
-                    SettingsHelper::getDoubleSetting(("M/" + name + "/kV").c_str()));
+
+    char key[64];
+    snprintf(key, sizeof(key), "M/%s/encrev", name);
+    SettingsHelper::addBoolSetting(key, false);
+    snprintf(key, sizeof(key), "M/%s/kP", name);
+    SettingsHelper::addDoubleSetting(key, .9549297);
+    snprintf(key, sizeof(key), "M/%s/kI", name);
+    SettingsHelper::addDoubleSetting(key, .47746485);
+    snprintf(key, sizeof(key), "M/%s/kD", name);
+    SettingsHelper::addDoubleSetting(key, 0.0);
+    snprintf(key, sizeof(key), "M/%s/kS", name);
+    SettingsHelper::addDoubleSetting(key, 0.24);
+    snprintf(key, sizeof(key), "M/%s/kV", name);
+    SettingsHelper::addDoubleSetting(key, 1.0);
+
+    // Set PID constants using the same key buffer
+    double kP, kI, kD, kS, kV;
+    snprintf(key, sizeof(key), "M/%s/kP", name);
+    kP = SettingsHelper::getDoubleSetting(key);
+    snprintf(key, sizeof(key), "M/%s/kI", name);
+    kI = SettingsHelper::getDoubleSetting(key);
+    snprintf(key, sizeof(key), "M/%s/kD", name);
+    kD = SettingsHelper::getDoubleSetting(key);
+    snprintf(key, sizeof(key), "M/%s/kS", name);
+    kS = SettingsHelper::getDoubleSetting(key);
+    snprintf(key, sizeof(key), "M/%s/kV", name);
+    kV = SettingsHelper::getDoubleSetting(key);
+    setPIDConstants(kP, kI, kD, kS, kV);
+    snprintf(key, sizeof(key), "M/%s/encrev", name);
+    encoderReverse = SettingsHelper::getBoolSetting(key);
+
     SettingsHelper::addDoubleSetting("wheelRadius", WHEEL_RADIUS);
     WHEEL_RADIUS = SettingsHelper::getDoubleSetting("wheelRadius");
-    SettingsHelper::registerDoubleCallback(("M/" + name + "/kP").c_str(), [this](const std::pair<const char*, double>& setting) {
+
+    snprintf(key, sizeof(key), "M/%s/kP", name);
+    SettingsHelper::registerDoubleCallback(key, [this](const std::pair<const char*, double>& setting) {
         pidConfig.kP = setting.second;
         ESP_LOGI(TAG, "Set kP to %f", pidConfig.kP);
     });
-    SettingsHelper::registerDoubleCallback(("M/" + name + "/kI").c_str(), [this](const std::pair<const char*, double>& setting) {
+    snprintf(key, sizeof(key), "M/%s/kI", name);
+    SettingsHelper::registerDoubleCallback(key, [this](const std::pair<const char*, double>& setting) {
         pidConfig.kI = setting.second;
         ESP_LOGI(TAG, "Set kI to %f", pidConfig.kI);
     });
-    SettingsHelper::registerDoubleCallback(("M/" + name + "/kD").c_str(), [this](const std::pair<const char*, double>& setting) {
+    snprintf(key, sizeof(key), "M/%s/kD", name);
+    SettingsHelper::registerDoubleCallback(key, [this](const std::pair<const char*, double>& setting) {
         pidConfig.kD = setting.second;
         ESP_LOGI(TAG, "Set kD to %f", pidConfig.kD);
     });
-    SettingsHelper::registerDoubleCallback(("M/" + name + "/kS").c_str(), [this](const std::pair<const char*, double>& setting) {
+    snprintf(key, sizeof(key), "M/%s/kS", name);
+    SettingsHelper::registerDoubleCallback(key, [this](const std::pair<const char*, double>& setting) {
         pidConfig.kS = setting.second;
         ESP_LOGI(TAG, "Set kS to %f", pidConfig.kS);
     });
-    SettingsHelper::registerDoubleCallback(("M/" + name + "/kV").c_str(), [this](const std::pair<const char*, double>& setting) {
+    snprintf(key, sizeof(key), "M/%s/kV", name);
+    SettingsHelper::registerDoubleCallback(key, [this](const std::pair<const char*, double>& setting) {
         pidConfig.kV = setting.second;
         ESP_LOGI(TAG, "Set kV to %f", pidConfig.kV);
     });
@@ -118,6 +144,12 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
         WHEEL_RADIUS = setting.second;
         ESP_LOGI(TAG, "Set wheel radius to %f", WHEEL_RADIUS);
     });
+    snprintf(key, sizeof(key), "M/%s/encrev", name);
+    SettingsHelper::registerBoolCallback(key, [this](const std::pair<const char*, bool>& setting) {
+        encoderReverse = setting.second;
+        ESP_LOGI(TAG, "Set encoder reverse to %s", encoderReverse ? "true" : "false");
+    });
+    
 
     Telemetry::registerPeriodicCallback([this]() {
         publishTelemetry();
@@ -131,9 +163,29 @@ void Motor::publishTelemetry() {
     char json[256];
     snprintf(json, sizeof(json), "{\"speed\":%f,\"ticks\":%d,\"output\":%f,\"setpoint\":%f,\"hasPower\":%s}",
              motor_speed, distanceTicks, output, pidSetpoint, _hasPower ? "true" : "false");
-    Telemetry::publishData((name+"/telemetry").c_str(), json, 0);
+    char topic[64];
+    snprintf(topic, sizeof(topic), "M/%s/telemetry", name);
+    Telemetry::publishData(topic, json, 0);
 
 
+}
+
+void Motor::testDirection() {
+    ESP_LOGI(TAG, "Testing motor direction for %s. Motor will run at half speed for 0.5 seconds.", name);
+    set(0.5);
+    vTaskDelay(500 / portTICK_PERIOD_MS);
+    if (motor_speed < -0.01) {
+        char key[64];
+        snprintf(key, sizeof(key), "M/%s/encrev", name);
+        encoderReverse = SettingsHelper::getBoolSetting(key);
+        SettingsHelper::setBoolSetting(key, !encoderReverse);
+        ESP_LOGI(TAG, "Reversing encoder direction");
+    } else if (motor_speed > 0.01) {
+        ESP_LOGI(TAG, "Direction is correct");
+    } else {
+        ESP_LOGW(TAG, "Motor did not move. Check wiring.");
+    }
+    set(0);
 }
 PIDConfig Motor::calibrate() {
     //calculate kS
@@ -176,7 +228,7 @@ int64_t Motor::getDistanceTicks()
         ESP_LOGE(TAG, "Encoder not initialized!");
         return 0;
     }
-    return encoder->getCount();
+    return encoder->getCount() * (encoderReverse ? -1 : 1);
 }
 
 void Motor::setPIDConstants(PIDConfig pidConfig)
@@ -213,7 +265,7 @@ void Motor::setReferenceMetersPerSec(double metersPerSec)
 void Motor::checkEncoder()
 {
 
-    counts = encoder->getCount(); // Get the current encoder count
+    counts = encoder->getCount() * (encoderReverse ? -1 : 1); // Get the current encoder count
     // diffCounts = counts-prevCounts;
     // prevCounts = counts;
     unsigned long tt = esp_timer_get_time();

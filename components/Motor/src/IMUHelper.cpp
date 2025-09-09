@@ -92,6 +92,6 @@ void IMUHelper::start() {
             });
 }
 
-double IMUHelper::getYaw() {
-    return IMUHelper::euler.z;
+double IMUHelper::getYaw(bool inDegrees) {
+    return inDegrees ? IMUHelper::euler.z * RAD_2_DEG : IMUHelper::euler.z;
 }

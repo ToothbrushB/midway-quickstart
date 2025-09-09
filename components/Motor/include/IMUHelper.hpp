@@ -9,9 +9,10 @@ public:
     static void calibrate();
     static void init();
     static void tare();
-    static double getYaw();
     static void start();
+    static double getYaw(bool inDegrees = false);
     static void resetYaw();
+
 private:
     static bno08x_euler_angle_t euler;
     static double yawOffset;

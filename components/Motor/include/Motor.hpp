@@ -19,7 +19,7 @@ struct PIDConfig {
 
 class Motor {
 public:
-    Motor(std::string name = "Motor");
+    Motor(char* name = "Motor");
     void set(double speed);
     void brake();
     void stop();
@@ -36,17 +36,20 @@ public:
 
     double getMotorSpeedMetersPerSec();
     bool hasPower() {return _hasPower;}
+    void testDirection();
     PIDConfig calibrate();
+    double getOutput() {return output;}
 
 private:
     void setInternal(double speed);
     bool doPid = false; // Flag to indicate if PID control is active
 
+    bool encoderReverse = false;
     ledc_channel_t channel;
     gpio_num_t motorIn1;
     gpio_num_t motorIn2;
     ESP32Encoder* encoder;
-    std::string name;
+    char* name;
 
 
     PIDConfig pidConfig;

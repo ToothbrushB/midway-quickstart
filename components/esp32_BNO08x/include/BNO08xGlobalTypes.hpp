@@ -568,8 +568,10 @@ typedef struct bno08x_euler_angle_t
 
         std::string toString() const
         {
-            return "Euler Angle: (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) +
-                   "), Accuracy: " + BNO08xAccuracy_to_str(accuracy) + ", Rad Accuracy: " + std::to_string(rad_accuracy);
+            return "{\"x\": " + std::to_string(x) + ", \"y\": " + std::to_string(y) + ", \"z\": " + std::to_string(z)
+                + ", \"accuracy\": \"" + BNO08xAccuracy_to_str(accuracy) + "\", \"rad_accuracy\": " + std::to_string(rad_accuracy) + "}";
+            // return "Euler Angle: (" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) +
+            //        "), Accuracy: " + BNO08xAccuracy_to_str(accuracy) + ", Rad Accuracy: " + std::to_string(rad_accuracy);
         }
 
 } bno08x_euler_angle_t;

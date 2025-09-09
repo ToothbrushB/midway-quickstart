@@ -206,10 +206,10 @@ void Telemetry::periodicTask(void* parameter) {
     
     while (periodicTaskRunning) {
                 static int log_counter = 0;
-        if (++log_counter % 100 == 0) { // Every 100 iterations
-            ESP_LOGI(TAG, "Free heap: %lu bytes, Queue size: %u", 
-                     esp_get_free_heap_size(), messageQueue.size());
-        }
+        // if (++log_counter % 100 == 0) { // Every 100 iterations
+        //     ESP_LOGI(TAG, "Free heap: %lu bytes, Queue size: %u", 
+        //              esp_get_free_heap_size(), messageQueue.size());
+        // }
         // Process all periodic callbacks
         std::lock_guard<std::mutex> lock(periodicMutex);
         
@@ -409,20 +409,20 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
             } else { /* ignore all pongs */ }
         });
         
-        esp_timer_create_args_t timer_args = {
-            .callback = [](void* arg) {
-                // Check if we need to send a ping
-                if (esp_timer_get_time() - lastPingTime > 10e6) { // 10 seconds
-                    ESP_LOGW(TAG, "No ping received in the last 10 seconds.."); 
-                }
-            },
-            .arg = NULL,
-            .dispatch_method = ESP_TIMER_TASK,
-            .name = "TelemetryPingTimer",
-            .skip_unhandled_events = false,
-        };
-        esp_timer_create(&timer_args, &timerHandle);
-        esp_timer_start_periodic(timerHandle, 1000000); // 1 second interval
+        // esp_timer_create_args_t timer_args = {
+        //     .callback = [](void* arg) {
+        //         // Check if we need to send a ping
+        //         if (esp_timer_get_time() - lastPingTime > 10e6) { // 10 seconds
+        //             ESP_LOGW(TAG, "No ping received in the last 10 seconds.."); 
+        //         }
+        //     },
+        //     .arg = NULL,
+        //     .dispatch_method = ESP_TIMER_TASK,
+        //     .name = "TelemetryPingTimer",
+        //     .skip_unhandled_events = false,
+        // };
+        // esp_timer_create(&timer_args, &timerHandle);
+        // esp_timer_start_periodic(timerHandle, 1000000); // 1 second interval
         break;
     }
     case MQTT_EVENT_DISCONNECTED:

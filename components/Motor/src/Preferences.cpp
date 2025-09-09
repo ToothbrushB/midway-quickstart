@@ -21,7 +21,7 @@
 
 // #define nvs_error(e) 
 
-const char *TAG = "Preferences";
+static const char *TAG = "Preferences";
 Preferences::Preferences() : _handle(0), _started(false), _readOnly(false) {}
 
 Preferences::~Preferences() {

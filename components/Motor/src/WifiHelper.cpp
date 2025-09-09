@@ -24,7 +24,7 @@ static int s_retry_num = 0;
 
 
 // Static member variable definition
-uint8_t WifiHelper::macAddress[6];  // Add this line
+uint8_t WifiHelper::macAddress[6];
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -119,7 +119,11 @@ void WifiHelper::init(void)
             // Publish WiFi signal strength
             int rssi = 0;
             esp_wifi_sta_get_rssi(&rssi);
-            Telemetry::publishData("wifi/rssi", rssi);
+            // make a json of rssi in the format {"rssi": rssi} using format string
+            char rssi_str[32];
+            snprintf(rssi_str, sizeof(rssi_str), "{\"rssi\": %d}", rssi);
+
+            Telemetry::publishData("wifi/rssi", rssi_str);
         }, PublishFrequency::HZ_1);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
@@ -128,4 +132,10 @@ void WifiHelper::init(void)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
+}
+
+int WifiHelper::getRssi() {
+    int rssi = 0;
+    esp_wifi_sta_get_rssi(&rssi);
+    return rssi;
 }

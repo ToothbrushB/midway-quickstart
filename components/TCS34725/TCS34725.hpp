@@ -19,8 +19,8 @@
 #include <stdbool.h>
 #include <esp_err.h>
 #include <driver/i2c.h>
-#include "LedStripHelper.hpp"
 #include <esp_timer.h>
+#include "LED.hpp"
 
 // TCS34725 I2C Address
 #define TCS34725_ADDRESS          (0x29)

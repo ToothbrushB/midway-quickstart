@@ -12,7 +12,7 @@ std::map<const char*, std::string> SettingsHelper::defaultStringSettings;
 std::map<const char*, int> SettingsHelper::defaultIntSettings;
 std::map<const char*, double> SettingsHelper::defaultDoubleSettings;
 std::map<const char*, bool> SettingsHelper::defaultBoolSettings;
-std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>> SettingsHelper::stringCallbacks;
+std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>> SettingsHelper::stringCallbacks; // name, pair(needs to be updated, callback[name, value])
 std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, int>)>>> SettingsHelper::intCallbacks;
 std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, double>)>>> SettingsHelper::doubleCallbacks;
 std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, bool>)>>> SettingsHelper::boolCallbacks;

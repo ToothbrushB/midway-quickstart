@@ -173,7 +173,7 @@ void Motor::publishTelemetry() {
 void Motor::testDirection() {
     ESP_LOGI(TAG, "Testing motor direction for %s. Motor will run at half speed for 0.5 seconds.", name);
     set(0.5);
-    vTaskDelay(500 / portTICK_PERIOD_MS);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
     if (motor_speed < -0.01) {
         char key[64];
         snprintf(key, sizeof(key), "M/%s/encrev", name);

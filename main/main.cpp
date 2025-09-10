@@ -1,5 +1,3 @@
-
-
 #include <stdio.h>
 
 #include "freeRTOS\freeRTOS.h"
@@ -76,8 +74,7 @@ Motor motorRight = Motor("right");
 VL53L0X sensorLeft;
 VL53L0X sensorRight;
 
-    LED led;
-
+LED led;
 
 State state = State::IDLE;
 
@@ -202,14 +199,14 @@ static void runTheRobot(void *pvParameters)
     // }
 }
 
+void do_led(void *pvParameters)
+{
+    int red[] = {100, 230, 25, 30, 30, 50, 50, 100, 255, 255, 255, 255};
+    int green[] = {100, 100, 15, 10, 30, 15, 20, 20, 165, 0, 25, 50};
+    int blue[] = {100, 200, 40, 20, 30, 30, 80, 20, 50, 0, 0, 0};
 
-
-void do_led(void *pvParameters) {
-    int red[] = {100,230,25,30,30,50, 50, 100, 255, 255, 255, 255};
-    int green[] = {100,100,15,10,30,15, 20, 20, 165, 0, 25, 50};
-    int blue[] = {100,200,40,20,30,30, 80, 20, 50, 0, 0, 0};
-    
-    while (true) {
+    while (true)
+    {
 
         // pick a random color from the above arrays
         int index = rand() % 6;
@@ -226,6 +223,77 @@ void do_led(void *pvParameters) {
     }
 }
 
+static void setupHardware()
+{
+    led.init();
+
+    // Add timeout for IMUHelper::init()
+    {
+        const int timeout_ms = 2000;
+        int elapsed = 0;
+        bool imu_init_done = false;
+        TaskHandle_t imuInitTask;
+        auto imuInitWrapper = [](void *param)
+        {
+            IMUHelper::init();
+            IMUHelper::start();
+            vTaskDelete(NULL);
+        };
+        xTaskCreate(imuInitWrapper, "IMUInitTask", 2048, NULL, 5, &imuInitTask);
+        while (!imu_init_done && elapsed < timeout_ms)
+        {
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            elapsed += 10;
+            // If the task is deleted, init is done
+            if (eTaskGetState(imuInitTask) == eDeleted)
+            {
+                imu_init_done = true;
+            }
+        }
+        if (!imu_init_done)
+        {
+            ESP_LOGE(TAG, "IMUHelper::init() timeout");
+            vTaskDelete(imuInitTask);
+        }
+    }
+
+    if (i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK)
+    {
+        ESP_LOGI(TAG, "I2C driver installed successfully");
+        i2c_config_t config = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = 21,
+            .scl_io_num = 22,
+            .sda_pullup_en = true,
+            .scl_pullup_en = true,
+            .master = {.clk_speed = 100000}};
+        if (i2c_param_config(I2C_NUM_0, &config))
+        { // Config failed
+            i2c_driver_delete(I2C_NUM_0);
+            ESP_LOGE(TAG, "I2C param config failed");
+        }
+        else
+        {
+            ESP_LOGI(TAG, "I2C param config successful");
+        }
+        i2c_set_timeout(I2C_NUM_0, 80000); // Clock stretching
+        i2c_filter_enable(I2C_NUM_0, 5);
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to install I2C driver");
+    }
+
+    colorSensor.init(I2C_NUM_0);
+
+    encoderLeft.attachFullQuad(34, 35);
+    encoderRight.attachFullQuad(36, 39);
+
+    motorLeft.setup(GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_16, LEDC_TIMER_0, LEDC_CHANNEL_0, encoderLeft);
+    motorRight.setup(GPIO_NUM_27, GPIO_NUM_14, GPIO_NUM_4, LEDC_TIMER_0, LEDC_CHANNEL_1, encoderRight);
+    motorLeft.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
+    motorRight.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
+}
 
 extern "C" void app_main()
 {
@@ -241,64 +309,13 @@ extern "C" void app_main()
     // SNTPHelper::waitForSync();
     // SNTPHelper::print_current_time();
     // Telemetry::waitForConnection();
-
-    led.init();
-    IMUHelper::init();
-    IMUHelper::start();
-
-    encoderLeft.attachFullQuad(34, 35);
-    encoderRight.attachFullQuad(36, 39);
-
-
-    motorLeft.setup(GPIO_NUM_13, GPIO_NUM_12, GPIO_NUM_16, LEDC_TIMER_0, LEDC_CHANNEL_0, encoderLeft);
-    motorRight.setup(GPIO_NUM_27, GPIO_NUM_14, GPIO_NUM_4, LEDC_TIMER_0, LEDC_CHANNEL_1, encoderRight);
-    motorLeft.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
-    motorRight.setPIDConstants(0.9549297, 0.047746485, 0.00, 0.24, 1.7);
-    motorLeft.setReferenceMetersPerSec(0.02);
-    motorRight.setReferenceMetersPerSec(0.02);
-
+    setupHardware();
     SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
     ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
     SettingsHelper::registerDoubleCallback("robotWidth", [](const std::pair<const char *, double> &setting)
                                            {
         ROBOT_WIDTH = setting.second;
         ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
-                                  
-    // sensorLeft.config(I2C_NUM_0, 22, 21, 18, 0x29, 0);
-    // sensorRight.config(I2C_NUM_0, 22, 21, 19, 0x29, 0);
-
-    // // Initialize the sensor
-
-    // vTaskDelay(1000 / portTICK_PERIOD_MS); // Wait for sensor to initialize
-    // sensorLeft.init(0x31);
-    // ESP_LOGW(TAG, "SENSOR 2");
-    // sensorRight.init(0x30);
-    // ESP_LOGW("TAG", "PLUG IN COLOR SENSOR");
-    // vTaskDelay(5000 / portTICK_PERIOD_MS); // Wait for sensor to initialize
-    // // colorSensor.init(I2C_NUM_0);
-    // // Configure sensor settings
-    // sensorLeft.setTimeout(500);                    // 500ms timeout
-    // sensorLeft.setSignalRateLimit(0.1f);           // Lower signal rate limit for longer range
-    // sensorLeft.setMeasurementTimingBudget(200000); // 200ms timing budget
-    // sensorLeft.startContinuous(100);
-    // sensorRight.startContinuous(100);
-    // ESP_LOGI(TAG, "Started continuous measurements (100ms period)");
-
-    // //     // Read continuous measurements for 10 seconds
-    // // while (1) {
-    // //     uint16_t distanceLeft = sensorLeft.readRangeContinuousMillimeters();
-    // //     uint16_t distanceRight = sensorRight.readRangeContinuousMillimeters();
-    // // }
-    // // uint16_t distance2=0;
-    // //     Color color = colorSensor.getColor();
-    // //   int r = gammatable[color.r];
-    // //   int g = gammatable[color.g];
-    // //   int b = gammatable[color.b];
-
-    // //     // IMUHelper::init();
-    // //     // IMUHelper::calibrate();
-    // //     // IMUHelper::start();
-    // //     printf("1\n");
 
     Odometry::setup(
         []()
@@ -309,54 +326,70 @@ extern "C" void app_main()
         { return IMUHelper::getYaw(); }, // Get yaw from IMU
         50                               // Update period in milliseconds
     );
-        SubscriptionHandle handleCommand2 = Telemetry::subscribe("ledcolor", [](const char *topic, const char *data, int data_len) {
+    SubscriptionHandle handleCommand2 = Telemetry::subscribe("ledcolor", [](const char *topic, const char *data, int data_len)
+                                                             {
         ESP_LOGI(TAG, "Received LED color command: %.*s", data_len, data);
         // Parse the color from the command
         int r = 0, g = 0, b = 0;
         sscanf(data, "[%d, %d, %d]", &r, &g, &b);
-        led.set_color_rgb(r, g, b);
-    });
+        led.set_color_rgb(r, g, b); });
 
     // PurePursuit purePursuit = PurePursuit(0.05); // Look ahead distance
-        // purePursuit.setPath(xPoses, yPoses, 200);
-        // purePursuit.start();
+    // purePursuit.setPath(xPoses, yPoses, 200);
+    // purePursuit.start();
 
-        Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()})); // Seed the odometry with a starting pose
+    Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()})); // Seed the odometry with a starting pose
 
-        TaskHandle_t ledHandle;
-        xTaskCreate(do_led, "do_led", 4096, NULL, 1, &ledHandle);
-        Pose2d pose;
-        // while (!purePursuit.checkStop())
-        ESP_LOGI(TAG, "STARTING");
+    TaskHandle_t ledHandle;
+    xTaskCreate(do_led, "do_led", 4096, NULL, 1, &ledHandle);
+    Pose2d pose;
+    // while (!purePursuit.checkStop())
+    ESP_LOGI(TAG, "STARTING");
 
-        motorLeft.testDirection();
-        motorRight.testDirection();
-        SettingsHelper::applySettings();
-        while (true)
-        {
-            pose = Odometry::getCurrentPose();
-            // purePursuit.compute(pose.getX(),
-            //                     pose.getY(),
-            //                     pose.getHeading());
-            double omega = LINSPEED / 1;
-            // double omega = purePursuit.getCurvature() * LINSPEED; // m^-1 v_d = 0.01 m/s
-            double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
-            double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
+    motorLeft.testDirection();
+    motorRight.testDirection();
+    SettingsHelper::applySettings();
 
-            // printf("Left: %f, Right: %f, Omega: %f\n", left, right, omega);
-            motorLeft.setReferenceMetersPerSec(left);
-            motorRight.setReferenceMetersPerSec(right);
-
-            double speedRight = motorRight.getMotorSpeedMetersPerSec();
-            double speedLeft = motorLeft.getMotorSpeedMetersPerSec();
-
-            printf("leftset: %f, rightset: %f, left: %f, right: %f\n", left, right, speedLeft, speedRight);
-            vTaskDelay(300 / portTICK_PERIOD_MS);
+    SettingsHelper::addIntSetting("tcs/thresh", 200);
+    int thresh = SettingsHelper::getIntSetting("tcs/thresh");
+    SettingsHelper::registerIntCallback("tcs/thresh", [&thresh](const std::pair<const char*, int>& p)
+                                         {
+        thresh = p.second;
+        ESP_LOGI(TAG, "TCS threshold set to: %d", p.second);
+    });
+    
+    while (true)
+    {
+        int reflectance = colorSensor.getClear();
+        if (reflectance > thresh) {
+            motorLeft.setReferenceMetersPerSec(0);
+            motorRight.setReferenceMetersPerSec(0);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            continue;
         }
+        pose = Odometry::getCurrentPose();
 
+        // purePursuit.compute(pose.getX(),
+        //                     pose.getY(),
+        //                     pose.getHeading());
+        // double omega = LINSPEED / 1;
+        // double omega = purePursuit.getCurvature() * LINSPEED; // m^-1 v_d = 0.01 m/s
+        // double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
+        // double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
+
+        // printf("Left: %f, Right: %f, Omega: %f\n", left, right, omega);
+        motorLeft.setReferenceMetersPerSec(0.02);
+        motorRight.setReferenceMetersPerSec(0.02);
+
+        double speedRight = motorRight.getMotorSpeedMetersPerSec();
+        double speedLeft = motorLeft.getMotorSpeedMetersPerSec();
+
+        printf("leftset: %f, rightset: %f, left: %f, right: %f\n", 0.02, 0.02, speedLeft, speedRight);
+        vTaskDelay(300 / portTICK_PERIOD_MS);
+    }
 
     SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
-    {
+                                                            {
         ESP_LOGI(TAG, "Received command: %.*s", data_len, data);
         // Handle the command
         if (strncmp(data, "start", data_len) == 0)
@@ -437,17 +470,5 @@ extern "C" void app_main()
         else
         {
             ESP_LOGW(TAG, "Unknown command: %.*s", data_len, data);
-        }
-    });
-
-
-
-    // Create VL53L0X instance
-    // VL53L0X sensor;
-    // VL53L0X sensor2;
-    // colorSensor.init(I2C_NUM_0);
-    // Configure the sensor on I2C port 0, SCL=GPIO22, SDA=GPIO21
-
-
-
+        } });
 }

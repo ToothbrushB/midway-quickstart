@@ -16,4 +16,5 @@ public:
 private:
     static bno08x_euler_angle_t euler;
     static double yawOffset;
+    static bool reverseYaw;
 };

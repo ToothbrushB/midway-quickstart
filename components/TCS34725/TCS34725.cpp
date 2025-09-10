@@ -61,10 +61,20 @@ uint16_t TCS34725::read16(uint8_t reg) {
 
 // Public functions
 
-esp_err_t TCS34725::init(i2c_port_t i2c_port) {
+esp_err_t TCS34725::init(i2c_port_t i2c_port, gpio_num_t power_pin) {
     if (_initialized) {
         ESP_LOGE(TAG, "TCS34725 already initialized");
         return ESP_FAIL;
+    }
+
+    if (power_pin != GPIO_NUM_NC) {
+        // Set the power pin to output and turn on
+        gpio_reset_pin(power_pin);
+        gpio_set_direction(power_pin, GPIO_MODE_OUTPUT);
+        gpio_set_level(power_pin, 0);
+        vTaskDelay(20 / portTICK_PERIOD_MS); // Wait for power down
+        gpio_set_level(power_pin, 1);
+        vTaskDelay(50 / portTICK_PERIOD_MS); // Wait for power up
     }
 
     _i2c_port = i2c_port;

@@ -81,7 +81,7 @@ public:
     ~TCS34725();
     
     // Initialize the sensor
-    esp_err_t init(i2c_port_t i2c_port);
+    esp_err_t init(i2c_port_t i2c_port, gpio_num_t power_pin = GPIO_NUM_NC);
     
     // Enable/disable the device
     void enable();

@@ -99,6 +99,7 @@ void SNTPHelper::init() {
 void SNTPHelper::start() {
     // Start SNTP service
     ESP_ERROR_CHECK(esp_netif_sntp_start());
+    print_servers();
 }
 
 void SNTPHelper::deinit() {

@@ -446,6 +446,11 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
+            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                ESP_LOGI(TAG, "Last error code reported from esp-tls: 0x%x", event->error_handle->esp_tls_last_esp_err);
+                ESP_LOGI(TAG, "Last tls stack error number: 0x%x", event->error_handle->esp_tls_stack_err);
+                ESP_LOGI(TAG, "Last captured errno : %d (%s)",  event->error_handle->esp_transport_sock_errno, strerror(event->error_handle->esp_transport_sock_errno));
+            }
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event->event_id);
@@ -457,8 +462,8 @@ void Telemetry::init() {
     // Initialization code
         const esp_mqtt_client_config_t mqtt_cfg = {
         .broker = {
-            .address = {.uri = CONFIG_BROKER_URI},
-            .verification = {.crt_bundle_attach = esp_crt_bundle_attach}
+            .address = {.uri = CONFIG_BROKER_URI}
+            // .verification = {.crt_bundle_attach = esp_crt_bundle_attach}
         },
         .credentials = {
             .username = "esp",

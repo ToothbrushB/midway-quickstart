@@ -72,9 +72,11 @@ esp_err_t TCS34725::init(i2c_port_t i2c_port, gpio_num_t power_pin) {
         gpio_reset_pin(power_pin);
         gpio_set_direction(power_pin, GPIO_MODE_OUTPUT);
         gpio_set_level(power_pin, 0);
+        ESP_LOGI(TAG, "Powering off TCS34725 on pin %d", power_pin);
         vTaskDelay(20 / portTICK_PERIOD_MS); // Wait for power down
         gpio_set_level(power_pin, 1);
-        vTaskDelay(50 / portTICK_PERIOD_MS); // Wait for power up
+        ESP_LOGI(TAG, "Powering on TCS34725 on pin %d", power_pin);
+        vTaskDelay(300 / portTICK_PERIOD_MS); // Wait for power up
     }
 
     _i2c_port = i2c_port;

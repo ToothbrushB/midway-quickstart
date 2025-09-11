@@ -16,7 +16,7 @@ std::function<double(void)> Odometry::heading = []() { return 0.0; }; // Default
 esp_timer_handle_t Odometry::timerHandle; // Timer handle for periodic updates
 
 void Odometry::timer(void* arg) {
-    updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
+    // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
     updateSimpleNoImu(Odometry::vLeft(), Odometry::vRight(), esp_timer_get_time());
 }
 
@@ -43,7 +43,7 @@ void Odometry::setup(std::function<double(void)> vLeft, std::function<double(voi
         
         Pose2d pose2 = Odometry::getCurrentPose2();
         Telemetry::publishData("odometry/pose2", pose2.toString());
-    }, PublishFrequency::HZ_100); // Adjust frequency as needed
+    }, PublishFrequency::HZ_10); // Adjust frequency as needed
 }
 
 Pose2d Odometry::update(double vLeft, double vRight, double headingRad, uint64_t tt) {

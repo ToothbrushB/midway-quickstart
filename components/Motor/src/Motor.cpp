@@ -153,7 +153,7 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
 
     Telemetry::registerPeriodicCallback([this]() {
         publishTelemetry();
-    }, PublishFrequency::HZ_50);
+    }, PublishFrequency::HZ_10);
 }
 
 void Motor::publishTelemetry() {
@@ -362,6 +362,7 @@ void Motor::setInternal(double speed) {
 
 void Motor::brake()
 {
+    doPid = false;
     gpio_set_level(motorIn1, 1);
     gpio_set_level(motorIn2, 1);
     ledc_set_duty(MOTOR_PWM_MODE, channel, 0);
@@ -370,6 +371,7 @@ void Motor::brake()
 
 void Motor::stop()
 {
+    doPid = false;
     gpio_set_level(motorIn1, 0);
     gpio_set_level(motorIn2, 0);
     ledc_set_duty(MOTOR_PWM_MODE, channel, 0);

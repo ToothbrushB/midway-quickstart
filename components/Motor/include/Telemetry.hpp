@@ -8,7 +8,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include <string>
 #pragma once
 
 
@@ -50,7 +49,6 @@ public:
     static void publishData(const char* topic,double payload,int qos=0);
     static void publishData(const char* topic,int payload,int qos=0);
     static void publishData(const char* topic,bool payload,int qos=0);
-    static void publishData(const char *topic, std::string payload, int qos=0);
 
     static SubscriptionHandle subscribe(const char* topic, SubscriptionCallback callback);
     static bool unsubscribe(SubscriptionHandle handle);

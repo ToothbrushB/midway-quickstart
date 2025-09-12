@@ -4,7 +4,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include <WifiHelper.hpp>
-#include <string>
 #include <esp_mac.h>
 #include "esp_timer.h"
 #include <queue>
@@ -414,7 +413,7 @@ void Telemetry::publishTask(void *parameter)
 void Telemetry::publishData(const char *topic, const char *payload, int qos)
 {
     // Queue data for publishing with timestamp
-    // queueMessage(topic, payload, qos);
+    queueMessage(topic, payload, qos);
 }
 
 void Telemetry::publishData(const char *topic, double payload, int qos)
@@ -422,7 +421,7 @@ void Telemetry::publishData(const char *topic, double payload, int qos)
     // Convert double to string and queue for publishing
     char payload_str[32];
     snprintf(payload_str, sizeof(payload_str), "%.6f", payload);
-    // queueMessage(topic, payload_str, qos);
+    queueMessage(topic, payload_str, qos);
 }
 
 void Telemetry::publishData(const char *topic, int payload, int qos)
@@ -430,20 +429,14 @@ void Telemetry::publishData(const char *topic, int payload, int qos)
     // Convert int to string and queue for publishing
     char payload_str[32];
     snprintf(payload_str, sizeof(payload_str), "%d", payload);
-    // queueMessage(topic, payload_str, qos);
+    queueMessage(topic, payload_str, qos);
 }
 
 void Telemetry::publishData(const char *topic, bool payload, int qos)
 {
     // Convert bool to string and queue for publishing
     const char *payload_str = payload ? "true" : "false";
-    // queueMessage(topic, payload_str, qos);
-}
-
-void Telemetry::publishData(const char *topic, std::string payload, int qos)
-{
-    // Queue string data for publishing
-    // queueMessage(topic, payload.c_str(), qos);
+    queueMessage(topic, payload_str, qos);
 }
 /******************************
  * MQTT event handling & init *

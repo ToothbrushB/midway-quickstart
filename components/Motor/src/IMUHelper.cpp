@@ -65,8 +65,10 @@ void IMUHelper::init()
     Telemetry::registerPeriodicCallback([]()
                                         {
                                             // Publish IMU data
-
-                                            Telemetry::publishData("imu/euler", IMUHelper::euler.toString());
+                                            char buf[128];
+                                            size_t len = sizeof(buf);
+                                            snprintf(buf, len, "{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f,\"rad_accuracy\":%.6f}", euler.x, euler.y, euler.z, euler.rad_accuracy);
+                                            Telemetry::publishData("imu", buf);
                                         },
                                         PublishFrequency::HZ_10);
 }

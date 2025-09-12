@@ -5,10 +5,8 @@
 
 std::mutex Odometry::poseMutex; // Mutex for thread-safe access to currentPose
 Pose2d Odometry::currentPose(0.0, 0.0, 0.0); // Initialize current pose
-Pose2d Odometry::currentPose2(0.0, 0.0, 0.0); // Initialize current pose
 
 double Odometry::lastUpdateTime = 0.0; // Initialize last update time
-double Odometry::lastUpdateTime2 = 0.0; // For the second pose
 double Odometry::previousHeading = 0.0; // Initialize previous heading
 std::function<double(void)> Odometry::vLeft = []() { return 0.0; }; // Default left wheel velocity function
 std::function<double(void)> Odometry::vRight = []() { return 0.0; }; // Default right wheel velocity function
@@ -36,13 +34,12 @@ void Odometry::setup(std::function<double(void)> vLeft, std::function<double(voi
     esp_timer_create(&timer_args, &timerHandle);
     esp_timer_start_periodic(timerHandle, periodMs* 1000); // Convert milliseconds to microseconds
 
-    Telemetry::registerPeriodicCallback([]() {
+    char buf[96];
+    Telemetry::registerPeriodicCallback([&buf]() {
         // Publish the current pose periodically
         Pose2d pose = Odometry::getCurrentPose();
-        Telemetry::publishData("odometry/pose", pose.toString());
-        
-        Pose2d pose2 = Odometry::getCurrentPose2();
-        Telemetry::publishData("odometry/pose2", pose2.toString());
+        pose.toString(buf, sizeof(buf));
+        Telemetry::publishData("odometry/pose", buf);
     }, PublishFrequency::HZ_10); // Adjust frequency as needed
 }
 
@@ -89,25 +86,25 @@ Pose2d Odometry::updateSimple(double vLeft, double vRight, double headingRad, ui
 
 Pose2d Odometry::updateSimpleNoImu(double vLeft, double vRight, uint64_t tt) {
         // Update the odometry information based on the wheel velocities and current time
-    double dt = (tt - lastUpdateTime2) / 1000000.0; // Convert microseconds to seconds
-    lastUpdateTime2 = tt;
+    double dt = (tt - lastUpdateTime) / 1000000.0; // Convert microseconds to seconds
+    lastUpdateTime = tt;
     if (dt > 1) {
-        return getCurrentPose2(); // If the time difference is too large, return the last known pose
+        return getCurrentPose(); // If the time difference is too large, return the last known pose
     }
     double linearVelocity = (vLeft + vRight) / 2.0; // Average of left and right wheel velocities
     double angularVelocity = (vRight - vLeft) / ROBOT_WIDTH; // Difference gives the angular velocity
     //keep heading within [-pi, pi]
-    double newHeading = currentPose2.getHeading() + angularVelocity * dt;
+    double newHeading = currentPose.getHeading() + angularVelocity * dt;
     if (newHeading < -M_PI) {
         newHeading += 2 * M_PI;
     } else if (newHeading > M_PI) {
         newHeading -= 2 * M_PI;
     }
 
-    currentPose2 = Pose2d(
-        currentPose2.getX() + linearVelocity * dt * cos(currentPose2.getHeading()),
-        currentPose2.getY() + linearVelocity * dt * sin(currentPose2.getHeading()),
+    currentPose = Pose2d(
+        currentPose.getX() + linearVelocity * dt * cos(currentPose.getHeading()),
+        currentPose.getY() + linearVelocity * dt * sin(currentPose.getHeading()),
         newHeading
     );
-    return currentPose2;
+    return currentPose;
 }

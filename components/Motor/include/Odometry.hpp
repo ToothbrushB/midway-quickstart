@@ -39,9 +39,8 @@ public:
     double getHeading() const { return heading; }
 
     // Method to convert to a string representation
-    char* toString() const {
-        char* buf = new char[96];
-        snprintf(buf, 96, "{\"x\":%.6f,\"y\":%.6f,\"heading\":%.6f}", x, y, heading);
+    char* toString(char* buf, size_t len) const {
+        snprintf(buf, len, "{\"x\":%.6f,\"y\":%.6f,\"heading\":%.6f}", x, y, heading);
         return buf;
     }
 
@@ -79,17 +78,12 @@ public:
     static Pose2d getCurrentPose() {
         return currentPose;
     }
-    static Pose2d getCurrentPose2() {
-        return currentPose2;
-    }
 
 
 protected:
     static std::mutex poseMutex;
     static Pose2d currentPose;
-    static Pose2d currentPose2; // For the second pose
     static double lastUpdateTime;
-    static double lastUpdateTime2; // For the second pose
     static double previousHeading;
     static Pose2d updateSimple(double vLeft, double vRight, double headingRad, uint64_t tt);
     static Pose2d updateSimpleNoImu(double vLeft, double vRight, uint64_t tt);

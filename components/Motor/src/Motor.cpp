@@ -39,6 +39,7 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
     ESP_ERROR_CHECK(gpio_set_direction(in1, GPIO_MODE_OUTPUT));
     ESP_ERROR_CHECK(gpio_set_direction(in2, GPIO_MODE_OUTPUT));
 
+    ESP_LOGI(TAG, "REACHED A");
 
     // Set pwm variable to the pin number from the enum
     int pwm = pwmPin;
@@ -151,9 +152,11 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
     });
     
 
+    ESP_LOGI(TAG, "Reached B");
     Telemetry::registerPeriodicCallback([this]() {
         publishTelemetry();
     }, PublishFrequency::HZ_10);
+    ESP_LOGI(TAG, "Motor %s initialized successfully", name);
 }
 
 void Motor::publishTelemetry() {
@@ -164,7 +167,7 @@ void Motor::publishTelemetry() {
     snprintf(json, sizeof(json), "{\"speed\":%f,\"ticks\":%d,\"output\":%f,\"setpoint\":%f,\"hasPower\":%s}",
              motor_speed, distanceTicks, output, pidSetpoint, _hasPower ? "true" : "false");
     char topic[64];
-    snprintf(topic, sizeof(topic), "M/%s/telemetry", name);
+    snprintf(topic, sizeof(topic), "M/%s", name);
     Telemetry::publishData(topic, json, 0);
 
 

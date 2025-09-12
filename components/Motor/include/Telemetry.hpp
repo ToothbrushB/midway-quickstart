@@ -2,13 +2,13 @@
 #include "mqtt_client.h"
 #include "esp_tls.h"
 #include <functional>
-#include <string>
 #include <map>
 #include <queue>
 #include <mutex>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string>
 #pragma once
 
 
@@ -27,8 +27,8 @@ enum class PublishFrequency {
 
 // Structure for queued messages
 struct QueuedMessage {
-    std::string topic;
-    std::string payload;
+    char* topic; // edited to add in the base topic
+    const char* payload;
     int qos;
     uint64_t timestamp; // When the message was queued
 };
@@ -66,8 +66,8 @@ private:
     static bool isInit;
 
     static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
-    static std::string BASE_TOPIC; // Base topic for MQTT messages
-    static std::map<SubscriptionHandle, std::pair<std::string, SubscriptionCallback>> subscriptions;
+    static char* BASE_TOPIC; // Base topic for MQTT messages
+    static std::map<SubscriptionHandle, std::pair<const char*, SubscriptionCallback>> subscriptions;
     static SubscriptionHandle nextHandle;
     static void handleReceivedData(const char* topic, const char* data, int data_len);
     static uint64_t lastPingTime;
@@ -84,7 +84,7 @@ private:
     
     // Periodic publishing members
     static std::map<PeriodicHandle, PeriodicCallbackInfo> periodicCallbacks;
-    static std::mutex periodicMutex;
+    static SemaphoreHandle_t periodicMutex;
     static PeriodicHandle nextPeriodicHandle;
     static TaskHandle_t periodicTaskHandle;
     static bool periodicTaskRunning;

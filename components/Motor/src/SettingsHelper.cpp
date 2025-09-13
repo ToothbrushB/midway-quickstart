@@ -8,39 +8,39 @@
 
 static const char* TAG = "SettingsHelper";
 static const char* BASE_TOPIC = "settings/";
-std::map<const char*, std::string> SettingsHelper::defaultStringSettings;
-std::map<const char*, int> SettingsHelper::defaultIntSettings;
-std::map<const char*, double> SettingsHelper::defaultDoubleSettings;
-std::map<const char*, bool> SettingsHelper::defaultBoolSettings;
-std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>> SettingsHelper::stringCallbacks; // name, pair(needs to be updated, callback[name, value])
-std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, int>)>>> SettingsHelper::intCallbacks;
-std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, double>)>>> SettingsHelper::doubleCallbacks;
-std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, bool>)>>> SettingsHelper::boolCallbacks;
+std::map<const char*, std::string, cstr_less> SettingsHelper::defaultStringSettings;
+std::map<const char*, int, cstr_less> SettingsHelper::defaultIntSettings;
+std::map<const char*, double, cstr_less> SettingsHelper::defaultDoubleSettings;
+std::map<const char*, bool, cstr_less> SettingsHelper::defaultBoolSettings;
+std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>, cstr_less> SettingsHelper::stringCallbacks; // name, pair(needs to be updated, callback[name, value])
+std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, int>)>>, cstr_less> SettingsHelper::intCallbacks;
+std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, double>)>>, cstr_less> SettingsHelper::doubleCallbacks;
+std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, bool>)>>, cstr_less> SettingsHelper::boolCallbacks;
 Preferences SettingsHelper::preferences;
 
 void SettingsHelper::addStringSetting(const char* key, std::string defaultValue) {
-    defaultStringSettings[key] = defaultValue;
+    defaultStringSettings[strdup(key)] = defaultValue;
     if (!preferences.isKey(key)) {
         ESP_LOGI(TAG, "Adding string setting: %s = %s", key, defaultValue.c_str());
         preferences.putString(key, defaultValue);
     }
 }
 void SettingsHelper::addIntSetting(const char* key, int defaultValue) {
-    defaultIntSettings[key] = defaultValue;
+    defaultIntSettings[strdup(key)] = defaultValue;
     if (!preferences.isKey(key)) {
         ESP_LOGI(TAG, "Adding int setting: %s = %d", key, defaultValue);
         preferences.putInt(key, defaultValue);
     }
 }
 void SettingsHelper::addDoubleSetting(const char* key, double defaultValue) {
-    defaultDoubleSettings[key] = defaultValue;
+    defaultDoubleSettings[strdup(key)] = defaultValue;
     if (!preferences.isKey(key)) {
         ESP_LOGI(TAG, "Adding double setting: %s = %f", key, defaultValue);
         preferences.putDouble(key, defaultValue);
     }
 }
 void SettingsHelper::addBoolSetting(const char* key, bool defaultValue) {
-    defaultBoolSettings[key] = defaultValue;
+    defaultBoolSettings[strdup(key)] = defaultValue;
     if (!preferences.isKey(key)) {
         ESP_LOGI(TAG, "Adding bool setting: %s = %s", key, defaultValue ? "true" : "false");
         preferences.putBool(key, defaultValue);
@@ -86,9 +86,11 @@ void SettingsHelper::setDoubleSetting(const char* key, double value) {
     Telemetry::publishData(topic.c_str(), value);
 }
 void SettingsHelper::setBoolSetting(const char* key, bool value) {
+    ESP_LOGI(TAG, "Setting bool setting %s to %s", key, value ? "true" : "false");
     preferences.putBool(key, value);
     auto range = boolCallbacks.equal_range(key);
     for (auto it = range.first; it != range.second; ++it) {
+        ESP_LOGI(TAG, "Setting bool callback for key %s to true", key);
         it->second.first = true; // Mark as updated
     }
     std::string topic = std::string(BASE_TOPIC) + key;
@@ -127,28 +129,34 @@ void SettingsHelper::applyAllSettings() {
 }
 
 void SettingsHelper::applySettings() {
-    for (const auto& pair : stringCallbacks) {
+    for (auto& pair : stringCallbacks) {
         if (pair.second.first) {
             // If the value is updated, call it with the current value
             pair.second.second({pair.first, preferences.getString(pair.first, defaultStringSettings[pair.first])});
+            pair.second.first = false; // Mark as not updated anymore
         }
     }
-    for (const auto& pair : intCallbacks) {
+    for (auto& pair : intCallbacks) {
         if (pair.second.first) {
             // If the value is updated, call it with the current value
             pair.second.second({pair.first, preferences.getInt(pair.first, defaultIntSettings[pair.first])});
+            pair.second.first = false; // Mark as not updated anymore
         }
     }
-    for (const auto& pair : doubleCallbacks) {
+    for (auto& pair : doubleCallbacks) {
         if (pair.second.first) {
             // If the value is updated, call it with the current value
             pair.second.second({pair.first, preferences.getDouble(pair.first, defaultDoubleSettings[pair.first])});
+            pair.second.first = false; // Mark as not updated anymore
         }
     }
-    for (const auto& pair : boolCallbacks) {
+    for (auto& pair : boolCallbacks) {
+        ESP_LOGI(TAG, "Checking bool callback for key %s, needs update: %s", pair.first, pair.second.first ? "true" : "false");
         if (pair.second.first) {
             // If the value is updated, call it with the current value
+            printf("Applying bool setting %s %s\n", pair.first, preferences.getBool(pair.first, defaultBoolSettings[pair.first]) ? "true" : "false");
             pair.second.second({pair.first, preferences.getBool(pair.first, defaultBoolSettings[pair.first])});
+            pair.second.first = false; // Mark as not updated anymore
         }
     }
     ESP_LOGI(TAG, "Settings applied");
@@ -251,28 +259,29 @@ void SettingsHelper::resetStringSetting(const char* key) {
 
 void SettingsHelper::registerStringCallback(const char* key, std::function<void(const std::pair<const char*, std::string>&)> callback) {
     if (preferences.isKey(key)) {
-        stringCallbacks.insert({key, {false, callback}});
+    stringCallbacks.insert({strdup(key), {false, callback}});
     } else {
         ESP_LOGW(TAG, "Key %s does not exist in preferences", key);
     }
 }
 void SettingsHelper::registerIntCallback(const char* key, std::function<void(const std::pair<const char*, int>&)> callback) {
     if (preferences.isKey(key)) {
-        intCallbacks.insert({key, {false, callback}});
+    intCallbacks.insert({strdup(key), {false, callback}});
     } else {
         ESP_LOGW(TAG, "Key %s does not exist in preferences", key);
     }
 }
 void SettingsHelper::registerDoubleCallback(const char* key, std::function<void(const std::pair<const char*, double>&)> callback) {
     if (preferences.isKey(key)) {
-        doubleCallbacks.insert({key, {false, callback}});
+    doubleCallbacks.insert({strdup(key), {false, callback}});
     } else {
         ESP_LOGW(TAG, "Key %s does not exist in preferences", key);
     }
 }
 void SettingsHelper::registerBoolCallback(const char* key, std::function<void(const std::pair<const char*, bool>&)> callback) {
     if (preferences.isKey(key)) {
-        boolCallbacks.insert({key, {false, callback}});
+        ESP_LOGI(TAG, "Registering bool callback for key %s", key);
+    boolCallbacks.insert({strdup(key), {false, callback}});
     } else {
         ESP_LOGW(TAG, "Key %s does not exist in preferences", key);
     }

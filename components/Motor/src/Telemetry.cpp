@@ -16,9 +16,10 @@ esp_mqtt_client_handle_t Telemetry::client; // Static member variable definition
 bool Telemetry::isConnected = false;        // Static member variable definition
 bool Telemetry::isInit = false;             // Static member variable definition
 
-std::map<SubscriptionHandle, std::pair<const char *, SubscriptionCallback>> Telemetry::subscriptions;
+std::map<SubscriptionHandle, std::pair<std::string, SubscriptionCallback>> Telemetry::subscriptions;
 SubscriptionHandle Telemetry::nextHandle = 0; // Initialize static handle counter
-char *Telemetry::BASE_TOPIC;
+std::string Telemetry::BASE_TOPIC;
+std::string Telemetry::lastWillTopic;
 uint64_t Telemetry::lastPingTime = 0;      // Initialize last ping time
 esp_timer_handle_t Telemetry::timerHandle; // Timer handle for periodic tasks
 SubscriptionHandle Telemetry::ping = -1;   // Subscription handle for ping messages
@@ -84,25 +85,21 @@ SubscriptionHandle Telemetry::subscribe(const char *topic, SubscriptionCallback 
     }
 
     // Create full topic with base
-    char *fullTopic = (char *)malloc(strlen(BASE_TOPIC) + strlen(topic) + 1);
-    strcpy(fullTopic, BASE_TOPIC);
-    strcat(fullTopic, topic);
+    std::string fullTopic = BASE_TOPIC + topic;
 
     // Subscribe to MQTT topic
-    int msg_id = esp_mqtt_client_subscribe(client, fullTopic, 1);
+    int msg_id = esp_mqtt_client_subscribe(client, fullTopic.c_str(), 1);
     if (msg_id == -1)
     {
-        ESP_LOGE(TAG, "Failed to subscribe to topic: %s", fullTopic);
-        free(fullTopic);
+        ESP_LOGE(TAG, "Failed to subscribe to topic: %s", fullTopic.c_str());
         return -1;
     }
 
     // Store subscription
     SubscriptionHandle handle = nextHandle++;
-    subscriptions[handle] = std::make_pair(strdup(topic), callback);
+    subscriptions[handle] = std::make_pair(std::string(topic), callback);
 
-    ESP_LOGI(TAG, "Subscribed to topic: %s with handle: %d", fullTopic, handle);
-    free(fullTopic);
+    ESP_LOGI(TAG, "Subscribed to topic: %s with handle: %d", fullTopic.c_str(), handle);
     return handle;
 }
 // Add unsubscribe method
@@ -116,17 +113,9 @@ bool Telemetry::unsubscribe(SubscriptionHandle handle)
     }
 
     // Unsubscribe from MQTT
-    char *fullTopic = (char *)malloc(strlen(BASE_TOPIC) + strlen(it->second.first) + 1);
-    strcpy(fullTopic, BASE_TOPIC);
-    strcat(fullTopic, it->second.first);
-
-    int msg_id = esp_mqtt_client_unsubscribe(client, fullTopic);
-
-    // Remove from subscriptions map
-
-    ESP_LOGI(TAG, "Unsubscribed from topic: %s", fullTopic);
-    free(fullTopic);
-    free((char *)it->second.first); // Free duplicated topic string
+    std::string fullTopic = BASE_TOPIC + it->second.first;
+    int msg_id = esp_mqtt_client_unsubscribe(client, fullTopic.c_str());
+    ESP_LOGI(TAG, "Unsubscribed from topic: %s", fullTopic.c_str());
     subscriptions.erase(it);
 
     return (msg_id != -1);
@@ -136,15 +125,15 @@ void Telemetry::handleReceivedData(const char *topic, const char *data, int data
 {
     // Extract relative topic (remove BASE_TOPIC prefix)
     const char *relativeTopic = topic;
-    size_t baseLen = strlen(BASE_TOPIC);
-    if (strncmp(topic, BASE_TOPIC, baseLen) == 0)
+    size_t baseLen = BASE_TOPIC.size();
+    if (strncmp(topic, BASE_TOPIC.c_str(), baseLen) == 0)
     {
         relativeTopic = topic + baseLen;
     }
     // Find matching subscriptions and call callbacks
     for (const auto &sub : subscriptions)
     {
-        if (strcmp(sub.second.first, relativeTopic) == 0)
+        if (sub.second.first == relativeTopic)
         {
             // Call the callback
             sub.second.second(relativeTopic, data, data_len);
@@ -288,30 +277,22 @@ void Telemetry::queueMessage(const char *topic, const char *payload, int qos)
     if (messageQueue.size() >= 100)
     { // Limit queue size
         ESP_LOGW(TAG, "Message queue full (%zu messages), dropping oldest message. %zu bytes", messageQueue.size(), free_heap);
-        QueuedMessage dropped = messageQueue.front();
-        free(dropped.topic);
-        free((char *)dropped.payload);
-        messageQueue.pop(); // Remove oldest message
+        messageQueue.pop(); // Remove oldest message (std::string handles memory)
     }
     if (free_heap < 1024)
     { // Less than 1KB free
 
         // Clear the entire queue to free memory
-        while (!messageQueue.empty())
+    while (!messageQueue.empty())
         {
-            QueuedMessage dropped = messageQueue.front();
-            free(dropped.topic);
-            free((char *)dropped.payload);
             messageQueue.pop();
         }
         ESP_LOGE(TAG, "Low memory (%zu bytes), clearing queue", free_heap);
         return;
     }
     QueuedMessage message;
-    message.topic = (char *)malloc(strlen(BASE_TOPIC) + strlen(topic) + 1);
-    strcpy(message.topic, BASE_TOPIC);
-    strcat(message.topic, topic);
-    message.payload = strdup(payload);
+    message.topic = BASE_TOPIC + topic;
+    message.payload = payload ? std::string(payload) : std::string();
     message.qos = qos;
     gettimeofday(&tv_now, NULL);
     int64_t time_us = (int64_t)tv_now.tv_sec * 1000000L + (int64_t)tv_now.tv_usec;
@@ -344,13 +325,19 @@ bool Telemetry::publishMessageWithTimestamp(const QueuedMessage &message)
     // Publish with user properties
     esp_mqtt5_client_set_user_property(&publish_property.user_property, user_property_arr, USE_PROPERTY_ARR_SIZE);
     esp_mqtt5_client_set_publish_property(client, &publish_property);
-    int msg_id = esp_mqtt_client_publish(client, message.topic, message.payload, 0, message.qos, 0);
+    int msg_id = esp_mqtt_client_publish(
+        client,
+        message.topic.c_str(),
+        message.payload.c_str(),
+        static_cast<int>(message.payload.size()),
+        message.qos,
+        0);
     esp_mqtt5_client_delete_user_property(publish_property.user_property); // Clean up user properties
     publish_property.user_property = NULL;
 
     if (msg_id == -1)
     {
-        ESP_LOGE(TAG, "Failed to publish message to topic: %s", message.topic);
+    ESP_LOGE(TAG, "Failed to publish message to topic: %s", message.topic.c_str());
         return false;
     }
 
@@ -399,9 +386,7 @@ void Telemetry::publishTask(void *parameter)
             }
             else
             {
-                // only free after successful publishing
-                free(message.topic);
-                free((char *)message.payload);
+                // success; nothing to free explicitly (std::string cleans up)
             }
 
             // Small delay between messages to avoid flooding
@@ -462,12 +447,9 @@ void Telemetry::mqtt5_event_handler(void *handler_args, esp_event_base_t base, i
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
         isConnected = true;
 
-        // Publish "Device started" message on connect
-        char *topic = (char *)malloc(strlen(BASE_TOPIC) + strlen("status") + 1);
-        strcpy(topic, BASE_TOPIC);
-        strcat(topic, "status");
-        esp_mqtt_client_publish(client, topic, "Connected", 0, 1, 0);
-        free(topic);
+    // Publish "Device started" message on connect
+    std::string topic = BASE_TOPIC + "status";
+    esp_mqtt_client_publish(client, topic.c_str(), "Connected", 0, 1, 0);
 
         // Notify publish task to process any queued messages
         if (publishTaskHandle != nullptr)
@@ -548,11 +530,13 @@ void Telemetry::init()
     // Initialization code
 
     uint8_t mac[6];
-    BASE_TOPIC = new char[32];
     esp_efuse_mac_get_default(mac);
-    snprintf(BASE_TOPIC, 32, "robots/%02x%02x%02x%02x%02x%02x/", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    char *lastWill = new char[50];
-    snprintf(lastWill, 50, "robots/%02x%02x%02x%02x%02x%02x/status", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    char base_buf[48];
+    snprintf(base_buf, sizeof(base_buf), "robots/%02x%02x%02x%02x%02x%02x/", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    BASE_TOPIC = base_buf;
+    char lwt_buf[64];
+    snprintf(lwt_buf, sizeof(lwt_buf), "robots/%02x%02x%02x%02x%02x%02x/status", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    lastWillTopic = lwt_buf;
     const esp_mqtt_client_config_t mqtt_cfg = {
         .broker = {
             .address = {.uri = CONFIG_BROKER_URI}
@@ -560,7 +544,7 @@ void Telemetry::init()
         },
         .credentials = {.username = "esp", .authentication = {.password = "esp32"}},
         .session = {
-            .last_will = {.topic = lastWill, .msg = "Disconnected!", .msg_len = 0, .qos = 1, .retain = 0},
+            .last_will = {.topic = lastWillTopic.c_str(), .msg = "Disconnected!", .msg_len = 0, .qos = 1, .retain = 0},
             .protocol_ver = MQTT_PROTOCOL_V_5, // Use MQTT v5 protocol
         }};
 

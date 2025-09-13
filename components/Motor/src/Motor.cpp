@@ -39,8 +39,6 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
     ESP_ERROR_CHECK(gpio_set_direction(in1, GPIO_MODE_OUTPUT));
     ESP_ERROR_CHECK(gpio_set_direction(in2, GPIO_MODE_OUTPUT));
 
-    ESP_LOGI(TAG, "REACHED A");
-
     // Set pwm variable to the pin number from the enum
     int pwm = pwmPin;
 
@@ -150,9 +148,8 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
         encoderReverse = setting.second;
         ESP_LOGI(TAG, "Set encoder reverse to %s", encoderReverse ? "true" : "false");
     });
-    
+    ESP_LOGI(TAG, "Callback registered for motor %s key %s", name, key);
 
-    ESP_LOGI(TAG, "Reached B");
     Telemetry::registerPeriodicCallback([this]() {
         publishTelemetry();
     }, PublishFrequency::HZ_10);
@@ -182,11 +179,12 @@ void Motor::testDirection() {
         snprintf(key, sizeof(key), "M/%s/encrev", name);
         encoderReverse = SettingsHelper::getBoolSetting(key);
         SettingsHelper::setBoolSetting(key, !encoderReverse);
-        ESP_LOGI(TAG, "Reversing encoder direction");
+        encoderReverse = !encoderReverse;
+        ESP_LOGI(TAG, "Reversing encoder direction. Motor speed: %f", motor_speed);
     } else if (motor_speed > 0.01) {
-        ESP_LOGI(TAG, "Direction is correct");
+        ESP_LOGI(TAG, "Direction is correct. Motor speed: %f", motor_speed);
     } else {
-        ESP_LOGW(TAG, "Motor did not move. Check wiring.");
+        ESP_LOGW(TAG, "Motor did not move. Check wiring. Motor speed: %f", motor_speed);
     }
     set(0);
 }

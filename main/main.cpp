@@ -96,30 +96,29 @@ static void runTheRobot(void *pvParameters)
     long rotateMaxTime = 0;
     bool rotateDirectionCcw = false;
 
-    Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()})); // Seed the odometry with a starting pose
+    Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose
 
     Pose2d pose;
 
-    static bool escaping = false;
-    // Fill xPoses and yPoses with values from 0 to 4.0 in steps of 0.1
-    for (int i = 0; i < 41; ++i) {
-        xPoses[i] = i * 0.1f;
-        yPoses[i] = i * 0.1f;
+    for (int i = 0; i < 200; ++i) {
+        float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
+        xPoses[i] = cos(t)*sin(3*t); 
+        yPoses[i] = sin(t)*sin(3*t);
     }
-    purePursuit.setPath(xPoses, yPoses, 41);
+
+    purePursuit.setPath(xPoses, yPoses, 200);
     purePursuit.start();
     state = State::ACTIVE_MOVING;
     while (true)
     {
         int reflectance = colorSensor.getClear();
-        if (reflectance > thresh && !escaping)
+        if (reflectance > thresh && state == State::ACTIVE_WANDERING)
         {
             state = State::ESCAPED_REVERSE;
             reverseTimer = 0;
             rotateTimer = 0;
             rotateMaxTime = 0;
             reverseTimer = esp_timer_get_time();
-            escaping = true;
             ESP_LOGW(TAG, "Reflectance threshold exceeded! Reversing motors. %d", reflectance);
         }
         switch (state)
@@ -167,10 +166,6 @@ static void runTheRobot(void *pvParameters)
         }
         case State::ACTIVE_WANDERING:
         {
-            if (escaping)
-            {
-                escaping = false;
-            }
             // Smooth random wandering
             static double omega = 0.0;
             static double targetOmega = 0.0;
@@ -224,8 +219,8 @@ static void runTheRobot(void *pvParameters)
         case State::ACTIVE_STOPPED:
         {
             // STOPPPPPPPPP
-            motorLeft.setReferenceMetersPerSec(0);
-            motorRight.setReferenceMetersPerSec(0);
+            motorLeft.stop();
+            motorRight.stop();
             break;
         }
         case State::OBSTRUCTED_STOPPED:
@@ -411,6 +406,15 @@ static void setupHardware()
     SettingsHelper::applySettings();
 }
 
+static void testEncoder() {
+    while (true) {
+        motorLeft.set(0.5);
+        motorRight.set(0.5);
+        Pose2d p = Odometry::getCurrentPose();
+        ESP_LOGI(TAG, "Left: %lld Right: %lld LS: %f RS %f, X: %f, Y: %f", encoderLeft.getCount(), encoderRight.getCount(), motorLeft.getMotorSpeed(), motorRight.getMotorSpeed(), p.getX(), p.getY());
+        vTaskDelay(500 / portTICK_PERIOD_MS);
+    }
+}
 extern "C" void app_main()
 {
 
@@ -418,14 +422,14 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     SettingsHelper::init();
-    Telemetry::init();
-    SNTPHelper::init();
+    // Telemetry::init();
+    // SNTPHelper::init();
     setupHardware();
-    WifiHelper::init();
-    SNTPHelper::start();
-    SNTPHelper::waitForSync();
-    SNTPHelper::print_current_time();
-    Telemetry::waitForConnection();
+    // WifiHelper::init();
+    // SNTPHelper::start();
+    // SNTPHelper::waitForSync();
+    // SNTPHelper::print_current_time();
+    // Telemetry::waitForConnection();
 
     SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
     ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
@@ -475,7 +479,7 @@ extern "C" void app_main()
 
     TaskHandle_t robotHandle;
     xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
-
+    // testEncoder();
     SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
                                                             {
         ESP_LOGI(TAG, "Received command: %.*s", data_len, data);

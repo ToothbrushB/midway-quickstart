@@ -5,6 +5,7 @@
 #include <map>
 #include <queue>
 #include <mutex>
+#include <string>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -26,8 +27,8 @@ enum class PublishFrequency {
 
 // Structure for queued messages
 struct QueuedMessage {
-    char* topic; // edited to add in the base topic
-    const char* payload;
+    std::string topic;   // full topic (BASE_TOPIC + relative)
+    std::string payload; // payload text
     int qos;
     uint64_t timestamp; // When the message was queued
 };
@@ -64,8 +65,9 @@ private:
     static bool isInit;
 
     static void mqtt5_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
-    static char* BASE_TOPIC; // Base topic for MQTT messages
-    static std::map<SubscriptionHandle, std::pair<const char*, SubscriptionCallback>> subscriptions;
+    static std::string BASE_TOPIC; // Base topic for MQTT messages
+    static std::string lastWillTopic; // Persisted LWT topic string
+    static std::map<SubscriptionHandle, std::pair<std::string, SubscriptionCallback>> subscriptions;
     static SubscriptionHandle nextHandle;
     static void handleReceivedData(const char* topic, const char* data, int data_len);
     static uint64_t lastPingTime;

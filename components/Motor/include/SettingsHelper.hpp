@@ -2,7 +2,13 @@
 #include <string>
 #include <functional>
 #include <Preferences.hpp>
+#include <cstring>
 #pragma once
+struct cstr_less {
+    bool operator()(const char* a, const char* b) const {
+        return strcmp(a, b) < 0;
+    }
+};
 class SettingsHelper {
 public:
     static void addStringSetting(const char* key, std::string defaultValue);
@@ -41,16 +47,16 @@ public:
 
     static void registerTelemetryListener(std::string topic);
 private:
-    static std::map<const char*, std::string> defaultStringSettings;
-    static std::map<const char*, int> defaultIntSettings;
-    static std::map<const char*, double> defaultDoubleSettings;
-    static std::map<const char*, bool> defaultBoolSettings;
+    static std::map<const char*, std::string, cstr_less> defaultStringSettings;
+    static std::map<const char*, int, cstr_less> defaultIntSettings;
+    static std::map<const char*, double, cstr_less> defaultDoubleSettings;
+    static std::map<const char*, bool, cstr_less> defaultBoolSettings;
 
     // Map settings name to pair(needs to be updated, callback function(name, value))
-    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>> stringCallbacks;
-    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, int>)>>> intCallbacks;
-    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, double>)>>> doubleCallbacks;
-    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, bool>)>>> boolCallbacks;
+    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, std::string>)>>, cstr_less> stringCallbacks;
+    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, int>)>>, cstr_less> intCallbacks;
+    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, double>)>>, cstr_less> doubleCallbacks;
+    static std::multimap<const char*, std::pair<bool, std::function<void(std::pair<const char*, bool>)>>, cstr_less> boolCallbacks;
     static Preferences preferences;
     static void publishAllSettings();
 };

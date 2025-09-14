@@ -12,6 +12,7 @@ public:
     static void start();
     static double getYaw(bool inDegrees = false);
     static void resetYaw();
+    static void resetYaw(double realYaw);
 
 private:
     static bno08x_euler_angle_t euler;

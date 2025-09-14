@@ -1,6 +1,7 @@
 #include "Odometry.hpp"
 #include <cmath>
 #include "Telemetry.hpp"
+#include "IMUHelper.hpp"
 #define ROBOT_WIDTH 0.13 // in meters
 
 std::mutex Odometry::poseMutex; // Mutex for thread-safe access to currentPose
@@ -12,10 +13,14 @@ std::function<double(void)> Odometry::vLeft = []() { return 0.0; }; // Default l
 std::function<double(void)> Odometry::vRight = []() { return 0.0; }; // Default right wheel velocity function
 std::function<double(void)> Odometry::heading = []() { return 0.0; }; // Default heading function
 esp_timer_handle_t Odometry::timerHandle; // Timer handle for periodic updates
-
-void Odometry::timer(void* arg) {
+bool Odometry::useImu = false; // Flag to determine if IMU should be used
+int Odometry::periodMs = 50; // Default period in milliseconds
+void Odometry::timer(void* arg) { //TODO replace w/ normal
     // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
-    updateSimpleNoImu(Odometry::vLeft(), Odometry::vRight(), esp_timer_get_time());
+    // if (useImu)
+        // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
+    // else
+        updateSimpleNoImu(Odometry::vLeft(), Odometry::vRight(), esp_timer_get_time());
 }
 
 void Odometry::setup(std::function<double(void)> vLeft, std::function<double(void)> vRight, std::function<double(void)> heading, int periodMs) {
@@ -23,7 +28,7 @@ void Odometry::setup(std::function<double(void)> vLeft, std::function<double(voi
     Odometry::vLeft = vLeft;
     Odometry::vRight = vRight;
     Odometry::heading = heading;
-    
+    Odometry::periodMs = periodMs;
     esp_timer_create_args_t timer_args = {
         .callback = timer,
         .arg = NULL,
@@ -32,7 +37,6 @@ void Odometry::setup(std::function<double(void)> vLeft, std::function<double(voi
         .skip_unhandled_events = false
     };
     esp_timer_create(&timer_args, &timerHandle);
-    esp_timer_start_periodic(timerHandle, periodMs* 1000); // Convert milliseconds to microseconds
 
     char buf[96];
     Telemetry::registerPeriodicCallback([&buf]() {
@@ -43,6 +47,9 @@ void Odometry::setup(std::function<double(void)> vLeft, std::function<double(voi
     }, PublishFrequency::HZ_10); // Adjust frequency as needed
 }
 
+void Odometry::start() {
+    esp_timer_start_periodic(timerHandle, periodMs* 1000); // Convert milliseconds to microseconds
+}
 Pose2d Odometry::update(double vLeft, double vRight, double headingRad, uint64_t tt) {
     std::lock_guard<std::mutex> lock(poseMutex); // Lock for thread safety
 
@@ -64,6 +71,7 @@ Pose2d Odometry::update(double vLeft, double vRight, double headingRad, uint64_t
 void Odometry::seed(Pose2d pose) {
     // Seed the odometry with a specific pose
     std::lock_guard<std::mutex> lock(poseMutex); // Lock for thread safety
+    IMUHelper::resetYaw(pose.getHeading());
     currentPose = pose;
 }
 
@@ -76,10 +84,24 @@ Pose2d Odometry::updateSimple(double vLeft, double vRight, double headingRad, ui
         return getCurrentPose(); // If the time difference is too large, return the last known pose
     }
     double linearVelocity = (vLeft + vRight) / 2.0; // Average of left and right wheel velocities
+    double angularVelocity = (vRight - vLeft) / ROBOT_WIDTH; // Difference gives the angular velocity
+    //keep heading within [-pi, pi]
+    double encoderHeading = currentPose.getHeading() + angularVelocity * dt;
+
+    // Normalize both angles to [0, 2*pi)
+    double normEncoder = fmod(encoderHeading + 2*M_PI, 2*M_PI);
+    double normImu = fmod(headingRad + 2*M_PI, 2*M_PI);
+
+    // Simple average
+    double fusedHeading = (normEncoder + normImu) / 2.0;
+
+    // Optionally, wrap fusedHeading to [-pi, pi] if needed
+    if (fusedHeading > M_PI) fusedHeading -= 2*M_PI;
+
     currentPose = Pose2d(
-        currentPose.getX() + linearVelocity * dt * cos(headingRad),
-        currentPose.getY() + linearVelocity * dt * sin(headingRad),
-        headingRad // Update heading based on imu
+        currentPose.getX() + linearVelocity * dt * cos(fusedHeading),
+        currentPose.getY() + linearVelocity * dt * sin(fusedHeading),
+        fusedHeading
     );
     return currentPose;
 }

@@ -79,6 +79,10 @@ public:
         return currentPose;
     }
 
+    static void setUseImu(bool use) {
+        useImu = use;
+    }
+    static void start();
 
 protected:
     static std::mutex poseMutex;
@@ -93,4 +97,6 @@ protected:
     static std::function<double(void)> vRight;
     static std::function<double(void)> heading;
     static esp_timer_handle_t timerHandle;
+    static bool useImu;
+    static int periodMs;
 };

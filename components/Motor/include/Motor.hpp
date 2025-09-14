@@ -26,6 +26,7 @@ public:
     void setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwm, ledc_timer_t timer, ledc_channel_t channel, ESP32Encoder& encoder);
     int64_t getDistanceTicks();
     void setPIDConstants(PIDConfig pidConfig);
+    PIDConfig getPIDConstants(void);
     void setPIDConstants(double kP, double kI, double kD, double kS, double kV);
 
     void setReferenceRadPerSec(double radPerSec);
@@ -44,6 +45,7 @@ private:
     void setInternal(double speed);
     bool doPid = false; // Flag to indicate if PID control is active
 
+    SemaphoreHandle_t encoderMutex = xSemaphoreCreateMutex();
     bool encoderReverse = false;
     ledc_channel_t channel;
     gpio_num_t motorIn1;

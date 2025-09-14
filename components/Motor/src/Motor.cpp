@@ -8,11 +8,13 @@
 #include <Telemetry.hpp>
 #include <string>
 #include "SettingsHelper.hpp"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #define MOTOR_PWM_FREQ 1000 // 1 kHz PWM frequency
 #define MOTOR_PWM_RES LEDC_TIMER_10_BIT
 #define MOTOR_PWM_MODE LEDC_HIGH_SPEED_MODE
 
-#define Ts 1000 // usec
+#define Ts 10000 // usec
 #define RATIO 25317 // 44 counts per rev, 600 reduction; measured 25317 ish
 double WHEEL_RADIUS = 0.033;
 #define PI 3.14159265358979
@@ -24,6 +26,7 @@ double WHEEL_RADIUS = 0.033;
 static const char* TAG = "Motor";
 Motor::Motor(char* name): name(name)
 {
+    encoderMutex = xSemaphoreCreateMutex();
 }
 
 // make a method that setup the motor pwm based on the pins that are passed into the method
@@ -38,6 +41,7 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
     // Set the GPIOs for IN1 and IN2
     ESP_ERROR_CHECK(gpio_set_direction(in1, GPIO_MODE_OUTPUT));
     ESP_ERROR_CHECK(gpio_set_direction(in2, GPIO_MODE_OUTPUT));
+
 
     // Set pwm variable to the pin number from the enum
     int pwm = pwmPin;
@@ -148,12 +152,11 @@ void Motor::setup(gpio_num_t in1, gpio_num_t in2, gpio_num_t pwmPin, ledc_timer_
         encoderReverse = setting.second;
         ESP_LOGI(TAG, "Set encoder reverse to %s", encoderReverse ? "true" : "false");
     });
-    ESP_LOGI(TAG, "Callback registered for motor %s key %s", name, key);
+    
 
-    Telemetry::registerPeriodicCallback([this]() {
-        publishTelemetry();
-    }, PublishFrequency::HZ_10);
-    ESP_LOGI(TAG, "Motor %s initialized successfully", name);
+    // Telemetry::registerPeriodicCallback([this]() {
+    //     publishTelemetry();
+    // }, PublishFrequency::HZ_10);
 }
 
 void Motor::publishTelemetry() {
@@ -164,7 +167,7 @@ void Motor::publishTelemetry() {
     snprintf(json, sizeof(json), "{\"speed\":%f,\"ticks\":%d,\"output\":%f,\"setpoint\":%f,\"hasPower\":%s}",
              motor_speed, distanceTicks, output, pidSetpoint, _hasPower ? "true" : "false");
     char topic[64];
-    snprintf(topic, sizeof(topic), "M/%s", name);
+    snprintf(topic, sizeof(topic), "M/%s/telemetry", name);
     Telemetry::publishData(topic, json, 0);
 
 
@@ -179,12 +182,11 @@ void Motor::testDirection() {
         snprintf(key, sizeof(key), "M/%s/encrev", name);
         encoderReverse = SettingsHelper::getBoolSetting(key);
         SettingsHelper::setBoolSetting(key, !encoderReverse);
-        encoderReverse = !encoderReverse;
-        ESP_LOGI(TAG, "Reversing encoder direction. Motor speed: %f", motor_speed);
+        ESP_LOGI(TAG, "Reversing encoder direction");
     } else if (motor_speed > 0.01) {
-        ESP_LOGI(TAG, "Direction is correct. Motor speed: %f", motor_speed);
+        ESP_LOGI(TAG, "Direction is correct");
     } else {
-        ESP_LOGW(TAG, "Motor did not move. Check wiring. Motor speed: %f", motor_speed);
+        ESP_LOGW(TAG, "Motor did not move. Check wiring.");
     }
     set(0);
 }
@@ -195,10 +197,13 @@ PIDConfig Motor::calibrate() {
     while (motor_speed < 0.001) {
         i += 0.01;
         set(i);
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
     }
     double kS = i;
 
+    set(0);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    printf("Calibrated kS: %f\n", kS);
     // calculate kV
     double output[20] = {0};
     double speed[20] = {0};
@@ -218,7 +223,8 @@ PIDConfig Motor::calibrate() {
         sumXX += output[j] * output[j];
     }
     double kV = (20 * sumXY - sumX * sumY) / (20 * sumXX - sumX * sumX);
-
+    printf("Calibrated kS: %f, kV: %f\n", kS, kV);
+    set(0);
     return PIDConfig{0.0,0.0,0.0,kS,kV};
 }
 
@@ -240,6 +246,10 @@ void Motor::setPIDConstants(PIDConfig pidConfig)
     previousError = 0.0;
     previousTime = 0.0; // Initialize previous time
 }
+
+PIDConfig Motor::getPIDConstants(void)
+{
+    return pidConfig;}
 
 void Motor::setPIDConstants(double kP, double kI, double kD, double kS, double kV)
 {
@@ -265,7 +275,11 @@ void Motor::setReferenceMetersPerSec(double metersPerSec)
 
 void Motor::checkEncoder()
 {
-
+    if (encoderMutex) {
+        if (!xSemaphoreTake(encoderMutex, 10)) {
+            return;
+        }
+    }
     counts = encoder->getCount() * (encoderReverse ? -1 : 1); // Get the current encoder count
     // diffCounts = counts-prevCounts;
     // prevCounts = counts;
@@ -285,6 +299,7 @@ void Motor::checkEncoder()
 
 ++ind;
   ind = ind % MOTOR_BUFFER_SIZE;
+    if (encoderMutex) xSemaphoreGive(encoderMutex);
 
 //   if (ind == 0)
 //   ESP_LOGI(TAG, "Encoder Position: %lld, Time: %lu, Motor Speed: %f, Acceleration: %f, Position: %f", 
@@ -292,7 +307,10 @@ void Motor::checkEncoder()
 }
 
 double Motor::getMotorSpeed() {
-    return motor_speed; // Return the current motor speed
+    if (encoderMutex) xSemaphoreTake(encoderMutex, portMAX_DELAY);
+    double speed = motor_speed;
+    if (encoderMutex) xSemaphoreGive(encoderMutex);
+    return speed; // Return the current motor speed
 }
 
 double Motor::getMotorSpeedMetersPerSec() {

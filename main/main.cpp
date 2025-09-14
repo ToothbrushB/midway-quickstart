@@ -2,7 +2,7 @@
 
 #include "freeRTOS\freeRTOS.h"
 #include "freeRTOS\task.h"
-
+#include "esp_heap_caps.h"
 #define LOG_LOCAL_LEVEL ESP_LOG_VERBOSE
 #include "esp_log.h"
 
@@ -44,13 +44,15 @@
 #include "VL53L0X.hpp"
 #include "LED.hpp"
 
+#define POINT_DENSITY 200
 // VL53L0X sensor;
 TCS34725 colorSensor = TCS34725();
 double ROBOT_WIDTH = 0.13; // in meters
 
 static const char *TAG = "MAIN";
 
-#define LINSPEED 0.01
+#define LINSPEED 0.02
+#define signum(x) ((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))
 
 enum class State
 {
@@ -58,16 +60,15 @@ enum class State
     IDLE,
     ACTIVE_MOVING,
     ACTIVE_STOPPED,
-    OBSTRUCTED_STOPPED,
-    OBSTRUCTED_REROUTING,
-    OBSTRUCTED_SCANNING,
     ACTIVE_WANDERING,
     ESCAPED_REVERSE,
-    ESCAPED_ROTATE
+    ESCAPED_ROTATE,
+    REVERSE_THE_OTHER_WAY,
+    CALIB_IMU
 };
 std::map<int, float> speedChanges;
-float xPoses[200];
-float yPoses[200];
+float xPoses[POINT_DENSITY];
+float yPoses[POINT_DENSITY];
 
 ESP32Encoder encoderLeft;
 ESP32Encoder encoderRight;
@@ -91,31 +92,58 @@ static void runTheRobot(void *pvParameters)
     const double omegaMax = 0.07;       // max turn rate (rad/s)
     const double omegaStep = 0.005;     // interpolation step
     const int omegaChangeInterval = 50; // change direction every 50 cycles (~15s if vTaskDelay is 300ms)
-    long reverseTimer = 0;
-    long rotateTimer = 0;
-    long rotateMaxTime = 0;
+    int64_t reverseTimer = 0;
+    int64_t rotateTimer = 0;
+    int64_t rotateMaxTime = 0;
     bool rotateDirectionCcw = false;
-
-    Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose
+    bool needToRotateTheOtherWay = false;
+    Odometry::seed(Pose2d({0.0, 1, 0})); // Seed the odometry with a starting pose squircle/circle
+    // Odometry::seed(Pose2d({2.01, 0.0, M_PI/2.0+0.01})); // Seed the odometry with a starting pose lisajous
+    // Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose line
 
     Pose2d pose;
 
-    for (int i = 0; i < 200; ++i) {
-        float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
-        xPoses[i] = cos(t)*sin(3*t); 
-        yPoses[i] = sin(t)*sin(3*t);
+    // for (int i = 0; i < 200; ++i) {  // squircle
+    //     float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
+    //     xPoses[i] = 1*signum(sin(t))*pow(abs(sin(t)),0.2);
+    //     yPoses[i] = 1*signum(cos(t))*pow(abs(cos(t)),0.2);
+    // }
+
+    // for (int i = 0; i < 200; ++i) {  // lissajous figure
+    //     float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
+    //     xPoses[i] = 2*sin(t+3.1415926/2);
+    //     yPoses[i] = 1*sin(2*t);
+    // }
+
+    // LINE
+    // for (int i = 0; i < 100; ++i) // line
+    // {
+    //     xPoses[i] = (i/100.0)*3;
+    //     yPoses[i] = 0;
+    // }
+    // for (int i = 100; i < 200; ++i) // line
+    // {
+    //     xPoses[i] = ((200-i)/100.0)*3;
+    //     yPoses[i] = 0;
+    // }
+
+    for (int i = 0; i < POINT_DENSITY; ++i) // 2 cycle circle
+    {
+        float t = i / (float)POINT_DENSITY * 2 * 3.1415926; // t from 0 to 2*PI
+        xPoses[i] = 1 * sin(t);
+        yPoses[i] = 1 * cos(t);
     }
 
-    purePursuit.setPath(xPoses, yPoses, 200);
+    purePursuit.setPath(xPoses, yPoses, POINT_DENSITY);
     purePursuit.start();
-    state = State::ACTIVE_MOVING;
+    state = State::CALIB_IMU;
     while (true)
     {
+        heap_caps_check_integrity_all(true);
         int reflectance = colorSensor.getClear();
         if (reflectance > thresh && state == State::ACTIVE_WANDERING)
         {
             state = State::ESCAPED_REVERSE;
-            reverseTimer = 0;
             rotateTimer = 0;
             rotateMaxTime = 0;
             reverseTimer = esp_timer_get_time();
@@ -123,9 +151,26 @@ static void runTheRobot(void *pvParameters)
         }
         switch (state)
         {
+        case State::REVERSE_THE_OTHER_WAY:
+        {
+            if (esp_timer_get_time() - rotateTimer < 3000000)
+            {
+                motorLeft.set(-0.5);
+                motorRight.set(0.5);
+            }
+            else
+            {
+                state = State::ACTIVE_WANDERING;
+                reverseTimer = 0;
+                rotateTimer = 0;
+                rotateMaxTime = 0;
+            }
+            led.set_color_rgb(0, 0, 255);
+            break;
+        }
         case State::ESCAPED_REVERSE:
         {
-            // Reverse for 10 second
+            // Reverse for 10 seconds
             if (esp_timer_get_time() - reverseTimer < 10000000)
             {
                 motorLeft.set(-0.5);
@@ -148,11 +193,20 @@ static void runTheRobot(void *pvParameters)
         }
         case State::ESCAPED_ROTATE:
         {
+
             // Rotate in place for 1.5 seconds
             if (esp_timer_get_time() - rotateTimer < rotateMaxTime)
             {
                 motorLeft.set(0.5);
                 motorRight.set(-0.5);
+                if (reflectance < thresh)
+                {
+                    state = State::REVERSE_THE_OTHER_WAY;
+                    reverseTimer = 0;
+                    rotateTimer = 0;
+                    rotateMaxTime = 0;
+                    rotateTimer = esp_timer_get_time();
+                }
             }
             else
             {
@@ -162,6 +216,22 @@ static void runTheRobot(void *pvParameters)
                 rotateMaxTime = 0;
             }
             led.set_color_rgb(0, 0, 255);
+            break;
+        }
+        case State::CALIB_IMU:
+        {
+            // Code for calibrating IMU
+            led.set_color_rgb(255, 0, 0);
+            motorLeft.set(1);
+            motorRight.set(-1);
+            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            motorLeft.stop();
+            motorRight.stop();
+            led.set_color_rgb(0, 255, 0);
+            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            led.set_color_rgb(0, 0, 0);
+            state = State::IDLE;
+            Odometry::start();
             break;
         }
         case State::ACTIVE_WANDERING:
@@ -185,8 +255,10 @@ static void runTheRobot(void *pvParameters)
             }
             double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
             double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
-            motorLeft.set(left / 0.025);
-            motorRight.set(right / 0.025);
+            // motorLeft.set(left / 0.025);
+            // motorRight.set(right / 0.025);
+            motorLeft.set(0.5);
+            motorRight.set(0.5);
             ESP_LOGI(TAG, "WANDER: omega=%.5f target=%.5f left=%.5f right=%.5f", omega, targetOmega, left, right);
             led.set_color_rgb(0, 255, 0);
             break;
@@ -204,11 +276,15 @@ static void runTheRobot(void *pvParameters)
                 double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
                 double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
 
-                printf("Left: %f, Right: %f, Omega: %f, curvature: %f, X: %f, Y: %f\n", left, right, omega, purePursuit.getCurvature(), pose.getX(), pose.getY());
+                printf("Left: %f, Right: %f, Omega: %f, curvature: %f, X: %f, Y: %f, H: %f, Gx: %f, Gy: %f\n", left, right, omega, purePursuit.getCurvature(), pose.getX(), pose.getY(), pose.getHeading() * 180 / M_PI, purePursuit.getGoalX(), purePursuit.getGoalY());
                 motorLeft.setReferenceMetersPerSec(left);
                 motorRight.setReferenceMetersPerSec(right);
-            } else {
-                state = State::IDLE;
+            }
+            else
+            {
+                purePursuit = PurePursuit(0.05);
+                purePursuit.setPath(xPoses, yPoses, 200);
+                purePursuit.start();
                 motorLeft.stop();
                 motorRight.stop();
                 ESP_LOGW(TAG, "Reached the goal!");
@@ -223,87 +299,14 @@ static void runTheRobot(void *pvParameters)
             motorRight.stop();
             break;
         }
-        case State::OBSTRUCTED_STOPPED:
-        {
-            motorLeft.setReferenceMetersPerSec(0);
-            motorRight.setReferenceMetersPerSec(0);
-            // Check distances from sensors
-            uint16_t distanceLeft = sensorLeft.readRangeContinuousMillimeters();
-            uint16_t distanceRight = sensorRight.readRangeContinuousMillimeters();
-            if (distanceLeft < ROBOT_WIDTH + 0.25 && distanceRight < ROBOT_WIDTH + 0.25)
-            {
-                state = State::ACTIVE_MOVING;
-            }
-            // Code for obstructed stopped state
-            break;
-        }
-        case State::OBSTRUCTED_REROUTING:
-        {
-            // Code for obstructed rerouting state
-            // For now, just stop the motors
-            motorLeft.setReferenceMetersPerSec(0);
-            motorRight.setReferenceMetersPerSec(0);
-            // send message to the server requesting a reroute
-            Telemetry::publishData("reroute_request", "{\"reroute\": true}");
-            // Wait for a response from the server
-            while (state == State::OBSTRUCTED_REROUTING)
-            {
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-                // check for a new path from the server
-            }
-            break;
-        }
-        case State::OBSTRUCTED_SCANNING:
-        {
-            // Code for obstructed scanning state
-            // spin turn
-            motorLeft.setReferenceMetersPerSec(0.1);
-            motorRight.setReferenceMetersPerSec(-0.1);
-            // Scan the environment using the sensors
-            uint16_t distanceLeftScan = sensorLeft.readRangeContinuousMillimeters();
-            uint16_t distanceRightScan = sensorRight.readRangeContinuousMillimeters();
-
-            // Record the distances at different yaw angles
-            double tempYaw = IMUHelper::getYaw();    // Convert to radians
-            double yawRad = fmod(tempYaw, 2 * M_PI); // Normalize to [0, 2π)
-
-            // Record distances every 5 degrees (converted to radians)
-            if (std::fmod(tempYaw, 1.0 * M_PI / 180.0) < 0.01)
-            {
-                distanceMap[tempYaw] = {distanceLeftScan, distanceRightScan};
-            }
-
-            // Check if we've completed a full rotation (2π radians)
-            if (std::abs(tempYaw - (yawRad + 2 * M_PI)) < 0.1)
-            {
-                // If we have completed a full rotation, stop the motors
-                motorLeft.setReferenceMetersPerSec(0);
-                motorRight.setReferenceMetersPerSec(0);
-            }
-            ESP_LOGI(TAG, "Left Distance: %d mm, Right Distance: %d mm", distanceLeftScan, distanceRightScan);
-            break;
-        }
         default:
         {
             break;
         }
+            // ESP_LOGI(TAG, "Reflectance: %d State: %d, Left: %f, Right: %f, Reverse: %ld, Rotate: %ld", reflectance, (int)state, motorLeft.getOutput(), motorRight.getOutput(), reverseTimer, rotateTimer);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
-        // ESP_LOGI(TAG, "Reflectance: %d State: %d, Left: %f, Right: %f, Reverse: %ld, Rotate: %ld", reflectance, (int)state, motorLeft.getOutput(), motorRight.getOutput(), reverseTimer, rotateTimer);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
-
-    // for (int i = 0; i < 200; ++i) {
-    //     // float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
-    //     // xPoses[i] = cos(t)*sin(3*t);
-    //     // yPoses[i] = sin(t)*sin(3*t);
-    //     xPoses[i] =  i/200.0; // Linear path in x direction
-    //     yPoses[i] = i/200.0; // Linear path in y direction
-    // }
-
-    // // publish entire xPoses and yPoses into MQTT
-    // for (size_t i = 0; i < 200; ++i) {
-    //     Telemetry::publishData("path", std::to_string(xPoses[i]) + ", " + std::to_string(yPoses[i]));
-    // }
 }
 
 void do_led(void *pvParameters)
@@ -355,11 +358,13 @@ static void setupHardware()
             if (eTaskGetState(imuInitTask) == eDeleted)
             {
                 imu_init_done = true;
+                Odometry::setUseImu(true);
             }
         }
         if (!imu_init_done)
         {
             ESP_LOGE(TAG, "IMUHelper::init() timeout");
+            Odometry::setUseImu(false);
             vTaskDelete(imuInitTask);
         }
     }
@@ -403,11 +408,24 @@ static void setupHardware()
 
     motorLeft.testDirection();
     motorRight.testDirection();
+
+    Odometry::setup(
+        []()
+        { return motorLeft.getMotorSpeedMetersPerSec(); },
+        []()
+        { return motorRight.getMotorSpeedMetersPerSec(); },
+        []()
+        { return IMUHelper::getYaw(); }, // Get yaw from IMU
+        50                               // Update period in milliseconds
+    );
+
     SettingsHelper::applySettings();
 }
 
-static void testEncoder() {
-    while (true) {
+static void testEncoder()
+{
+    while (true)
+    {
         motorLeft.set(0.5);
         motorRight.set(0.5);
         Pose2d p = Odometry::getCurrentPose();
@@ -422,14 +440,15 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     SettingsHelper::init();
-    // Telemetry::init();
-    // SNTPHelper::init();
+    SNTPHelper::init();
+    WifiHelper::init();
+    vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5 second for wifi to init
+    Telemetry::init();
     setupHardware();
-    // WifiHelper::init();
-    // SNTPHelper::start();
+    SNTPHelper::start();
     // SNTPHelper::waitForSync();
-    // SNTPHelper::print_current_time();
-    // Telemetry::waitForConnection();
+    SNTPHelper::print_current_time();
+    Telemetry::waitForConnection();
 
     SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
     ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
@@ -438,15 +457,6 @@ extern "C" void app_main()
         ROBOT_WIDTH = setting.second;
         ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
 
-    Odometry::setup(
-        []()
-        { return motorLeft.getMotorSpeedMetersPerSec(); },
-        []()
-        { return motorRight.getMotorSpeedMetersPerSec(); },
-        []()
-        { return IMUHelper::getYaw(); }, // Get yaw from IMU
-        50                               // Update period in milliseconds
-    );
     SubscriptionHandle handleCommand2 = Telemetry::subscribe("ledcolor", [](const char *topic, const char *data, int data_len)
                                                              {
         ESP_LOGI(TAG, "Received LED color command: %.*s", data_len, data);
@@ -455,8 +465,6 @@ extern "C" void app_main()
         sscanf(data, "[%d, %d, %d]", &r, &g, &b);
         led.set_color_rgb(r, g, b); });
 
-
-
     Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose
 
     // TaskHandle_t ledHandle;
@@ -464,7 +472,6 @@ extern "C" void app_main()
     ESP_LOGI(TAG, "STARTING");
 
     SettingsHelper::addIntSetting("tcs/thresh", 150);
-    // SettingsHelper::setIntSetting("tcs/thresh", 100);
     thresh = SettingsHelper::getIntSetting("tcs/thresh");
     SettingsHelper::registerIntCallback("tcs/thresh", [](const std::pair<const char *, int> &p)
                                         {
@@ -479,7 +486,6 @@ extern "C" void app_main()
 
     TaskHandle_t robotHandle;
     xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
-    // testEncoder();
     SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
                                                             {
         ESP_LOGI(TAG, "Received command: %.*s", data_len, data);
@@ -496,47 +502,47 @@ extern "C" void app_main()
             motorRight.stop();
             state = State::IDLE;
         }
-        else if (strncmp(data, "reset_odometry", data_len) == 0)
+        else if (strncmp(data, "respos", 6) == 0)
         {
-            ESP_LOGI(TAG, "Resetting odometry");
-            Odometry::seed(Pose2d({0.0, 0.0, IMUHelper::getYaw()}));
+            // Format: "respos,x,y,heading"
+            float x = 0, y = 0, heading = 0;
+            int parsed = sscanf(data, "respos,%f,%f,%f", &x, &y, &heading);
+            if (parsed == 3) {
+                ESP_LOGI(TAG, "Resetting odometry to x=%f, y=%f, heading=%f", x, y, heading);
+                Odometry::seed(Pose2d(x, y, heading));
+            } else {
+                ESP_LOGW(TAG, "Malformed respos command: %.*s", data_len, data);
+            }
         }
         else if (strncmp(data, "load_path", 9) == 0)
         {
-            ESP_LOGI(TAG, "Loading path");
-            // Example: "load_path, x[1, 2, 5, 3], y[1, 2, 3, 1]"
-            int xCount = 0, yCount = 0;
-            const char* xStart = strstr(data, "x[");
-            const char* yStart = strstr(data, "y[");
-            if (xStart && yStart) {
-                xStart += 2; // move past 'x['
-                yStart += 2; // move past 'y['
-                // Parse x values
-                while (*xStart && *xStart != ']') {
-                    while (*xStart == ' ' || *xStart == ',') xStart++;
-                    if (*xStart == ']') break;
-                    char* endPtr;
-                    float val = strtof(xStart, &endPtr);
-                    if (xCount < 200) xPoses[xCount++] = val;
-                    xStart = endPtr;
-                }
-                // Parse y values
-                while (*yStart && *yStart != ']') {
-                    while (*yStart == ' ' || *yStart == ',') yStart++;
-                    if (*yStart == ']') break;
-                    char* endPtr;
-                    float val = strtof(yStart, &endPtr);
-                    if (yCount < 200) yPoses[yCount++] = val;
-                    yStart = endPtr;
-                }
-                ESP_LOGI(TAG, "Loaded path with %d x and %d y points. x[0]=%f, y[0]=%f", xCount, yCount, xPoses[0], yPoses[0]);
-                int n = std::min(xCount, yCount);
-                purePursuit.setPath(xPoses, yPoses, n);
-                purePursuit.start();
-                state = State::ACTIVE_MOVING;
-                
+            // Format: "load_pathAxyxyxy..." where A is int, x/y are floats
+            if (data_len < 9 + sizeof(int)) {
+                ESP_LOGW(TAG, "Malformed load_path command: too short");
             } else {
-                ESP_LOGW(TAG, "Malformed load_path command");
+                // Pointer to start of packed data
+                const char* ptr = data + 9;
+                int n = 0;
+                memcpy(&n, ptr, sizeof(int));
+                ptr += sizeof(int);
+                if (n > POINT_DENSITY) n = POINT_DENSITY;
+                if (data_len < 9 + sizeof(int) + n * 2 * sizeof(float)) {
+                    ESP_LOGW(TAG, "Malformed load_path command: not enough data for %d points", n);
+                } else {
+                    for (int i = 0; i < n; ++i) {
+                        float x, y;
+                        memcpy(&x, ptr, sizeof(float));
+                        ptr += sizeof(float);
+                        memcpy(&y, ptr, sizeof(float));
+                        ptr += sizeof(float);
+                        xPoses[i] = x;
+                        yPoses[i] = y;
+                    }
+                    ESP_LOGI(TAG, "Loaded path with %d points. x[0]=%f, y[0]=%f", n, xPoses[0], yPoses[0]);
+                    purePursuit.setPath(xPoses, yPoses, n);
+                    purePursuit.start();
+                    state = State::ACTIVE_MOVING;
+                }
             }
         }
         else if (strncmp(data, "blink_pattern", 13) == 0)

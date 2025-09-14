@@ -13,7 +13,13 @@ bool IMUHelper::reverseYaw = false;
 
 void IMUHelper::resetYaw()
 {
-    yawOffset = IMUHelper::euler.z + yawOffset; // Reset the yaw offset to the current yaw
+    resetYaw(0.0);
+    ESP_LOGI(TAG, "Yaw offset reset to: %.2f", yawOffset);
+}
+
+void IMUHelper::resetYaw(double realYaw)
+{
+    yawOffset = realYaw - IMUHelper::euler.z;
     ESP_LOGI(TAG, "Yaw offset reset to: %.2f", yawOffset);
 }
 void IMUHelper::calibrate()
@@ -62,15 +68,15 @@ void IMUHelper::init()
         } });
 
     // Register telemetry callbacks for IMU data
-    Telemetry::registerPeriodicCallback([]()
-                                        {
-                                            // Publish IMU data
-                                            char buf[128];
-                                            size_t len = sizeof(buf);
-                                            snprintf(buf, len, "{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f,\"rad_accuracy\":%.6f}", euler.x, euler.y, euler.z, euler.rad_accuracy);
-                                            Telemetry::publishData("imu", buf);
-                                        },
-                                        PublishFrequency::HZ_10);
+    // Telemetry::registerPeriodicCallback([]()
+    //                                     {
+    //                                         // Publish IMU data
+    //                                         char buf[128];
+    //                                         size_t len = sizeof(buf);
+    //                                         snprintf(buf, len, "{\"x\":%.6f,\"y\":%.6f,\"z\":%.6f,\"rad_accuracy\":%.6f}", euler.x, euler.y, euler.z, euler.rad_accuracy);
+    //                                         Telemetry::publishData("imu", buf);
+    //                                     },
+    //                                     PublishFrequency::HZ_10);
 }
 void IMUHelper::tare()
 {
@@ -101,7 +107,7 @@ void IMUHelper::start()
             {
             case SH2_ARVR_STABILIZED_RV:
                 euler = imu.rpt.rv_ARVR_stabilized.get_euler(false);
-                euler.z -= IMUHelper::yawOffset; // Adjust yaw with offset
+                euler.z += IMUHelper::yawOffset; // Adjust yaw with offset
                 if (IMUHelper::reverseYaw)
                 {
                     euler.z = -euler.z;

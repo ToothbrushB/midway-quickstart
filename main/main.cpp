@@ -282,13 +282,13 @@ static void runTheRobot(void *pvParameters)
             }
             else
             {
-                purePursuit = PurePursuit(0.05);
-                purePursuit.setPath(xPoses, yPoses, 200);
-                purePursuit.start();
+                // purePursuit = PurePursuit(0.05);
+                // purePursuit.setPath(xPoses, yPoses, 200);
+                // purePursuit.start();
                 motorLeft.stop();
                 motorRight.stop();
                 ESP_LOGW(TAG, "Reached the goal!");
-                led.set_color_rgb(255, 255, 0);
+                led.set_color_rgb(0, 255, 255);
             }
             break;
         }
@@ -446,7 +446,7 @@ extern "C" void app_main()
     Telemetry::init();
     setupHardware();
     SNTPHelper::start();
-    // SNTPHelper::waitForSync();
+    SNTPHelper::waitForSync();
     SNTPHelper::print_current_time();
     Telemetry::waitForConnection();
 

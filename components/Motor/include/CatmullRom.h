@@ -31,6 +31,7 @@ public:
     float static catmullRomInterpolation(float* ary, int i, float t);
     void interpolate(int i, float t, float* x, float* y);
     float getParameterStep(int i, float targetStep);
+    int getCurrentIndex() { return _iterationArrayIndex; }
 
 private:
     float* _pathX;

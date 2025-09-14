@@ -52,6 +52,8 @@ void PurePursuit::computeNextGoalPoint(double xPos, double yPos)
 	// Simplify code.
 	while (true)
 	{
+
+		
 		double iterX = path.getIterationX();
 		double iterY = path.getIterationY();
 
@@ -69,6 +71,7 @@ void PurePursuit::computeNextGoalPoint(double xPos, double yPos)
 		// Serial.print(prevDist); Serial.print("\t");
 		// Serial.println(dist);
 
+		
 		if (prevDist < dist || !path.hasNext()) // break when we reach the end of the path or the distance starts increasing
 		{
 			break;

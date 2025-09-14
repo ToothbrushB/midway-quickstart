@@ -85,15 +85,20 @@ Pose2d Odometry::updateSimple(double vLeft, double vRight, double headingRad, ui
     }
     double linearVelocity = (vLeft + vRight) / 2.0; // Average of left and right wheel velocities
     double angularVelocity = (vRight - vLeft) / ROBOT_WIDTH; // Difference gives the angular velocity
+
     //keep heading within [-pi, pi]
     double encoderHeading = currentPose.getHeading() + angularVelocity * dt;
 
-    // Normalize both angles to [0, 2*pi)
     double normEncoder = fmod(encoderHeading + 2*M_PI, 2*M_PI);
     double normImu = fmod(headingRad + 2*M_PI, 2*M_PI);
-
-    // Simple average
-    double fusedHeading = (normEncoder + normImu) / 2.0;
+    double diff = normEncoder - normImu;
+    diff = fmod(diff + 2*M_PI, 2*M_PI);
+    if (fabs(diff) > M_PI) diff = -2*M_PI + diff;
+    
+    printf("%f \t%f\t%f\t%f\n", normEncoder*180.0/M_PI, normImu*180.0/M_PI, diff*180.0/M_PI);
+    
+    double fusedHeading = normImu + diff * 0.5;
+    fusedHeading = fmod(fusedHeading + 2*M_PI, 2*M_PI);
 
     // Optionally, wrap fusedHeading to [-pi, pi] if needed
     if (fusedHeading > M_PI) fusedHeading -= 2*M_PI;

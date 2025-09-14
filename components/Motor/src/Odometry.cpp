@@ -4,6 +4,7 @@
 #include "IMUHelper.hpp"
 #define ROBOT_WIDTH 0.13 // in meters
 
+static const char* TAG = "Odometry";
 std::mutex Odometry::poseMutex; // Mutex for thread-safe access to currentPose
 Pose2d Odometry::currentPose(0.0, 0.0, 0.0); // Initialize current pose
 
@@ -18,9 +19,10 @@ int Odometry::periodMs = 50; // Default period in milliseconds
 void Odometry::timer(void* arg) { //TODO replace w/ normal
     // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
     // if (useImu)
-        // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
+    //     updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
     // else
         updateSimpleNoImu(Odometry::vLeft(), Odometry::vRight(), esp_timer_get_time());
+
 }
 
 void Odometry::setup(std::function<double(void)> vLeft, std::function<double(void)> vRight, std::function<double(void)> heading, int periodMs) {
@@ -72,6 +74,7 @@ void Odometry::seed(Pose2d pose) {
     // Seed the odometry with a specific pose
     std::lock_guard<std::mutex> lock(poseMutex); // Lock for thread safety
     IMUHelper::resetYaw(pose.getHeading());
+    ESP_LOGI(TAG, "RESETTING YAW current yaw is %f", IMUHelper::getYaw());
     currentPose = pose;
 }
 
@@ -95,18 +98,15 @@ Pose2d Odometry::updateSimple(double vLeft, double vRight, double headingRad, ui
     diff = fmod(diff + 2*M_PI, 2*M_PI);
     if (fabs(diff) > M_PI) diff = -2*M_PI + diff;
     
-    printf("%f \t%f\t%f\t%f\n", normEncoder*180.0/M_PI, normImu*180.0/M_PI, diff*180.0/M_PI);
     
     double fusedHeading = normImu + diff * 0.5;
     fusedHeading = fmod(fusedHeading + 2*M_PI, 2*M_PI);
 
-    // Optionally, wrap fusedHeading to [-pi, pi] if needed
-    if (fusedHeading > M_PI) fusedHeading -= 2*M_PI;
-
+    // printf("Fused: %f enc: %f imu: %f\n", fusedHeading*180.0/M_PI, currentPose.getHeading()*180.0/M_PI, headingRad*180.0/M_PI);
     currentPose = Pose2d(
-        currentPose.getX() + linearVelocity * dt * cos(fusedHeading),
-        currentPose.getY() + linearVelocity * dt * sin(fusedHeading),
-        fusedHeading
+        currentPose.getX() + linearVelocity * dt * cos(headingRad),
+        currentPose.getY() + linearVelocity * dt * sin(headingRad),
+        headingRad
     );
     return currentPose;
 }

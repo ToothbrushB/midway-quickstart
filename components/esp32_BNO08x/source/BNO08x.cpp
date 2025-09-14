@@ -571,6 +571,10 @@ esp_err_t BNO08x::init_gpio()
         return ret;
 
     gpio_set_level(imu_config.io_cs, 1);
+    ESP_LOGI(TAG, "RST GPIO set to LOW for 100ms to reset IMU...");
+    gpio_set_level(imu_config.io_rst, 0);
+    vTaskDelay(pdMS_TO_TICKS(100)); // hold RST low for 100ms
+    ESP_LOGI(TAG, "RST GPIO set to HIGH to bring IMU out of reset...");
     gpio_set_level(imu_config.io_rst, 1);
 
     return ret;

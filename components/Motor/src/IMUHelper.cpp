@@ -26,11 +26,12 @@ void IMUHelper::calibrate()
 {
     imu.dynamic_calibration_run_routine();
 }
-void IMUHelper::init()
+int IMUHelper::init()
 {
     if (!imu.initialize())
     {
         ESP_LOGE("IMUHelper", "Failed to initialize IMU");
+        return 1;
     }
     else
     {
@@ -77,6 +78,7 @@ void IMUHelper::init()
     //                                         Telemetry::publishData("imu", buf);
     //                                     },
     //                                     PublishFrequency::HZ_10);
+    return 0;
 }
 void IMUHelper::tare()
 {
@@ -107,13 +109,10 @@ void IMUHelper::start()
             {
             case SH2_ARVR_STABILIZED_RV:
                 euler = imu.rpt.rv_ARVR_stabilized.get_euler(false);
-                euler.z += IMUHelper::yawOffset; // Adjust yaw with offset
                 if (IMUHelper::reverseYaw)
                 {
                     euler.z = -euler.z;
                 }
-                // ESP_LOGW(TAG, "Euler Angle: (x (roll): %.2f y (pitch): %.2f z (yaw): %.2f)[deg] accuracy: %.2f", euler.x*RAD_2_DEG, euler.y*RAD_2_DEG,
-                // euler.z*RAD_2_DEG, euler.rad_accuracy*RAD_2_DEG);
                 break;
             default:
 
@@ -124,5 +123,8 @@ void IMUHelper::start()
 
 double IMUHelper::getYaw(bool inDegrees)
 {
+    euler.z += IMUHelper::yawOffset; // Adjust yaw with offset
+
+    euler.z = fmod(euler.z + M_PI*2.0, M_PI*2.0); // Normalize to [0, 2pi)
     return inDegrees ? IMUHelper::euler.z * RAD_2_DEG : IMUHelper::euler.z;
 }

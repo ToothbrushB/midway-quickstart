@@ -27,8 +27,8 @@ public:
     float* getArrayX();
     float* getArrayY();
     int getLength();
-    float static getDistance(float x1, float y1, float x2, float y2);
-    float static catmullRomInterpolation(float* ary, int i, float t);
+    float getDistance(float x1, float y1, float x2, float y2);
+    float catmullRomInterpolation(float* ary, int i, float t);
     void interpolate(int i, float t, float* x, float* y);
     float getParameterStep(int i, float targetStep);
     int getCurrentIndex() { return _iterationArrayIndex; }

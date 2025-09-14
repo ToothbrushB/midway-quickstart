@@ -7,12 +7,13 @@ class IMUHelper {
 public:
     static BNO08x imu;
     static void calibrate();
-    static void init();
+    static int init();
     static void tare();
     static void start();
     static double getYaw(bool inDegrees = false);
     static void resetYaw();
     static void resetYaw(double realYaw);
+    static bno08x_euler_angle_t getEuler() { return euler; }
 
 private:
     static bno08x_euler_angle_t euler;

@@ -64,6 +64,7 @@ enum class State
     ESCAPED_REVERSE,
     ESCAPED_ROTATE,
     REVERSE_THE_OTHER_WAY,
+    WAITING_FOR_HUMAN,
     CALIB_IMU
 };
 std::map<int, float> speedChanges;
@@ -97,7 +98,7 @@ static void runTheRobot(void *pvParameters)
     int64_t rotateMaxTime = 0;
     bool rotateDirectionCcw = false;
     bool needToRotateTheOtherWay = false;
-    Odometry::seed(Pose2d({0.0, 1, 0})); // Seed the odometry with a starting pose squircle/circle
+    
     // Odometry::seed(Pose2d({2.01, 0.0, M_PI/2.0+0.01})); // Seed the odometry with a starting pose lisajous
     // Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose line
 
@@ -136,10 +137,9 @@ static void runTheRobot(void *pvParameters)
 
     purePursuit.setPath(xPoses, yPoses, POINT_DENSITY);
     purePursuit.start();
-    state = State::CALIB_IMU;
     while (true)
     {
-        heap_caps_check_integrity_all(true);
+        // printf("IMU YAW: %f\n", IMUHelper::getYaw(true));
         int reflectance = colorSensor.getClear();
         if (reflectance > thresh && state == State::ACTIVE_WANDERING)
         {
@@ -224,14 +224,24 @@ static void runTheRobot(void *pvParameters)
             led.set_color_rgb(255, 0, 0);
             motorLeft.set(1);
             motorRight.set(-1);
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
+            printf("Accuracy: %d\n", (int) IMUHelper::getEuler().accuracy);
+            if (IMUHelper::getEuler().accuracy == BNO08xAccuracy::HIGH)
+            {
+                state = State::WAITING_FOR_HUMAN;
+                
+            }
+            break;
+        }
+        case State::WAITING_FOR_HUMAN:
+        {
+            // Do nothing, waiting for human intervention
             motorLeft.stop();
             motorRight.stop();
             led.set_color_rgb(0, 255, 0);
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
-            led.set_color_rgb(0, 0, 0);
-            state = State::IDLE;
+            vTaskDelay(5000 / portTICK_PERIOD_MS); // wait for 5 seconds
+            Odometry::seed(Pose2d({0.0, 1, 0})); // Seed the odometry with a starting pose squircle/circle
             Odometry::start();
+            state = State::ACTIVE_MOVING;
             break;
         }
         case State::ACTIVE_WANDERING:
@@ -279,14 +289,15 @@ static void runTheRobot(void *pvParameters)
                 printf("Left: %f, Right: %f, Omega: %f, curvature: %f, X: %f, Y: %f, H: %f, Gx: %f, Gy: %f\n", left, right, omega, purePursuit.getCurvature(), pose.getX(), pose.getY(), pose.getHeading() * 180 / M_PI, purePursuit.getGoalX(), purePursuit.getGoalY());
                 motorLeft.setReferenceMetersPerSec(left);
                 motorRight.setReferenceMetersPerSec(right);
+                Telemetry::publishData("path_step", purePursuit.getPath()->getCurrentIndex());
             }
             else
             {
-                // purePursuit = PurePursuit(0.05);
-                // purePursuit.setPath(xPoses, yPoses, 200);
-                // purePursuit.start();
-                motorLeft.stop();
-                motorRight.stop();
+                purePursuit = PurePursuit(0.05);
+                purePursuit.setPath(xPoses, yPoses, 200);
+                purePursuit.start();
+                // motorLeft.stop();
+                // motorRight.stop();
                 ESP_LOGW(TAG, "Reached the goal!");
                 led.set_color_rgb(0, 255, 255);
             }
@@ -303,9 +314,8 @@ static void runTheRobot(void *pvParameters)
         {
             break;
         }
-            // ESP_LOGI(TAG, "Reflectance: %d State: %d, Left: %f, Right: %f, Reverse: %ld, Rotate: %ld", reflectance, (int)state, motorLeft.getOutput(), motorRight.getOutput(), reverseTimer, rotateTimer);
-            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
 
@@ -345,9 +355,14 @@ static void setupHardware()
         TaskHandle_t imuInitTask;
         auto imuInitWrapper = [](void *param)
         {
-            IMUHelper::init();
-            IMUHelper::start();
-            vTaskDelete(NULL);
+            if (IMUHelper::init() == 0)
+            {
+                IMUHelper::start();
+                vTaskDelete(NULL);
+            } else {
+                ESP_LOGE(TAG, "IMUHelper::init() failed");
+                vTaskSuspend(NULL);
+            }
         };
         xTaskCreate(imuInitWrapper, "IMUInitTask", 8192, NULL, 5, &imuInitTask);
         while (!imu_init_done && elapsed < timeout_ms)
@@ -359,6 +374,7 @@ static void setupHardware()
             {
                 imu_init_done = true;
                 Odometry::setUseImu(true);
+                state = State::CALIB_IMU;
             }
         }
         if (!imu_init_done)
@@ -366,6 +382,7 @@ static void setupHardware()
             ESP_LOGE(TAG, "IMUHelper::init() timeout");
             Odometry::setUseImu(false);
             vTaskDelete(imuInitTask);
+            state = State::WAITING_FOR_HUMAN;
         }
     }
 
@@ -422,33 +439,22 @@ static void setupHardware()
     SettingsHelper::applySettings();
 }
 
-static void testEncoder()
-{
-    while (true)
-    {
-        motorLeft.set(0.5);
-        motorRight.set(0.5);
-        Pose2d p = Odometry::getCurrentPose();
-        ESP_LOGI(TAG, "Left: %lld Right: %lld LS: %f RS %f, X: %f, Y: %f", encoderLeft.getCount(), encoderRight.getCount(), motorLeft.getMotorSpeed(), motorRight.getMotorSpeed(), p.getX(), p.getY());
-        vTaskDelay(500 / portTICK_PERIOD_MS);
-    }
-}
 extern "C" void app_main()
 {
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    SettingsHelper::init();
-    SNTPHelper::init();
-    WifiHelper::init();
-    vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5 second for wifi to init
-    Telemetry::init();
+    // SettingsHelper::init();
+    // SNTPHelper::init();
+    // WifiHelper::init();
+    // vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5 second for wifi to init
+    // Telemetry::init();
     setupHardware();
-    SNTPHelper::start();
-    SNTPHelper::waitForSync();
-    SNTPHelper::print_current_time();
-    Telemetry::waitForConnection();
+    // SNTPHelper::start();
+    // SNTPHelper::waitForSync();
+    // SNTPHelper::print_current_time();
+    // Telemetry::waitForConnection();
 
     SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
     ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
@@ -465,7 +471,6 @@ extern "C" void app_main()
         sscanf(data, "[%d, %d, %d]", &r, &g, &b);
         led.set_color_rgb(r, g, b); });
 
-    Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose
 
     // TaskHandle_t ledHandle;
     // xTaskCreate(do_led, "do_led", 4096, NULL, 1, &ledHandle);
@@ -486,6 +491,19 @@ extern "C" void app_main()
 
     TaskHandle_t robotHandle;
     xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
+
+    SubscriptionHandle handlePos = Telemetry::subscribe("pos", [](const char *topic, const char *data, int data_len)
+                                                        {
+
+        const char* ptr = data + 3;
+        float x = 0;
+        memcpy(&x, ptr, sizeof(float));
+        ptr += sizeof(float);
+        float y = 0;
+        memcpy(&y, ptr, sizeof(float));
+        ptr += sizeof(float);
+        Odometry::seed(Pose2d(x, y, Odometry::getCurrentPose().getHeading()));
+    });
     SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
                                                             {
         ESP_LOGI(TAG, "Received command: %.*s", data_len, data);

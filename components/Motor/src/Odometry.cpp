@@ -18,9 +18,9 @@ bool Odometry::useImu = false; // Flag to determine if IMU should be used
 int Odometry::periodMs = 50; // Default period in milliseconds
 void Odometry::timer(void* arg) { //TODO replace w/ normal
     // updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
-    // if (useImu)
-    //     updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
-    // else
+    if (useImu)
+        updateSimple(Odometry::vLeft(), Odometry::vRight(), Odometry::heading(), esp_timer_get_time());
+    else
         updateSimpleNoImu(Odometry::vLeft(), Odometry::vRight(), esp_timer_get_time());
 
 }

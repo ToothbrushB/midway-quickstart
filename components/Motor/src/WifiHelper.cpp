@@ -115,16 +115,6 @@ void WifiHelper::init(void)
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
                  CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_PASSWORD);
-        Telemetry::registerPeriodicCallback([]() {
-            // Publish WiFi signal strength
-            int rssi = 0;
-            esp_wifi_sta_get_rssi(&rssi);
-            // make a json of rssi in the format {"rssi": rssi} using format string
-            char rssi_str[32];
-            snprintf(rssi_str, sizeof(rssi_str), "{\"rssi\": %d}", rssi);
-
-            Telemetry::publishData("wifi/rssi", rssi_str);
-        }, PublishFrequency::HZ_1);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  CONFIG_ESP_WIFI_SSID, CONFIG_ESP_WIFI_PASSWORD);

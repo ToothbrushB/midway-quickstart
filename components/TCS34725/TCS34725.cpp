@@ -130,25 +130,8 @@ esp_err_t TCS34725::init(i2c_port_t i2c_port, gpio_num_t power_pin) {
 
     // publish to telemetry
     Telemetry::registerPeriodicCallback([this]() {
-        // Periodic callback code here
-        // publish current color in rgb, lux, and color temperature to telemetry using snprintf in json
-        if (hasError()) {
-            Telemetry::publishData("tcs", "{\"status\": \"error\"}", 0);
-            return;
-        } else if (!isInitialized()) {
-            Telemetry::publishData("tcs", "{\"status\": \"not_initialized\"}", 0);
-            return;
-        } else {
-            char json[128];
-            snprintf(json, sizeof(json), "{\"r\":%d, \"g\":%d, \"b\":%d, \"c\":%d, \"lux\":%d, \"color_temperature\":%d, \"status\":\"ok\"}",
-                    this->current_color.r, this->current_color.g, this->current_color.b,
-                    this->getClear(), this->lux, this->color_temperature);
-            Telemetry::publishData("tcs", json, 0);
-        }
-
-
-    }, PublishFrequency::HZ_1); // Adjust frequency as needed    
-
+        
+    },PublishFrequency::HZ_1);
 
     return ESP_OK;
 }

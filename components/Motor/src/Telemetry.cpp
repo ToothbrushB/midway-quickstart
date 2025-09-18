@@ -570,7 +570,7 @@ void Telemetry::waitForConnection()
 {
     while (!isConnected)
     {
-        vTaskDelay(500 / portTICK_PERIOD_MS);
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
         ESP_LOGI(TAG, "Waiting for MQTT connection...");
     }
 }

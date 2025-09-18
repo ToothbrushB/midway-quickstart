@@ -22,7 +22,6 @@ struct HSVColor {
 class LED {
     public:
         void init(int pin_r = 17, int pin_g = 2, int pin_b = 15, ledc_timer_t timer = LEDC_TIMER_1);
-        void blink(void);
         void set_color_rgb(Color c);
         void set_color_hsv(int hue, int saturation, int value);
         void set_color_rgb(int r, int g, int b);
@@ -45,6 +44,7 @@ class LED {
         int LED_GPIO_PIN_B = 15; // Default GPIO pin for blue
         Color current_color = LED::current_color; // Default color
         void configure_led(void);
+        void blink(void);
 
     protected:
         esp_timer_handle_t timerHandle; // Timer handle for periodic updates

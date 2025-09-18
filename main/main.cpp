@@ -44,14 +44,30 @@
 #include "VL53L0X.hpp"
 #include "LED.hpp"
 
-#define POINT_DENSITY 200
+// #include "jennys.hpp"
+// #define JENNY 1
+// #define X_START 1.6128565068493153
+// #define Y_START -1.5811717465753425
+// #define H_START 1.7126933813990632
+
+#define POINT_DENSITY 400
+#define CIRCLE_RADIUS 1.25
+// #define CCW 1
+#define LINSPEED 0.01
+#define BLINK_MS 1000
+#define THE_COLOR Color{255,0,10}
+#define LED_COLOR {THE_COLOR,THE_COLOR,THE_COLOR,Color{0, 0, 0},Color{0, 0, 0},Color{0, 0, 0},Color{0, 0, 0}}
+// #define LED_COLOR {THE_COLOR,Color{0, 0, 0}}
+
+double ROBOT_WIDTH = 0.13; // in meters
+
+// #define CONNECT_WIFI 1
+// #define WANDER 1
 // VL53L0X sensor;
 TCS34725 colorSensor = TCS34725();
-double ROBOT_WIDTH = 0.13; // in meters
 
 static const char *TAG = "MAIN";
 
-#define LINSPEED 0.02
 #define signum(x) ((x) > 0 ? 1 : ((x) < 0 ? -1 : 0))
 
 enum class State
@@ -65,7 +81,8 @@ enum class State
     ESCAPED_ROTATE,
     REVERSE_THE_OTHER_WAY,
     WAITING_FOR_HUMAN,
-    CALIB_IMU
+    CALIB_IMU,
+    SPIN_IN_PLACE
 };
 std::map<int, float> speedChanges;
 float xPoses[POINT_DENSITY];
@@ -96,13 +113,9 @@ static void runTheRobot(void *pvParameters)
     int64_t reverseTimer = 0;
     int64_t rotateTimer = 0;
     int64_t rotateMaxTime = 0;
-    bool rotateDirectionCcw = false;
     bool needToRotateTheOtherWay = false;
-    
-    // Odometry::seed(Pose2d({2.01, 0.0, M_PI/2.0+0.01})); // Seed the odometry with a starting pose lisajous
-    // Odometry::seed(Pose2d({0.0, 0.0, 0.0})); // Seed the odometry with a starting pose line
-
     Pose2d pose;
+    int hitTheLineCount = 0;
 
     // for (int i = 0; i < 200; ++i) {  // squircle
     //     float t = i/200.0*2*3.1415926; // t from 0 to 2*PI
@@ -128,12 +141,35 @@ static void runTheRobot(void *pvParameters)
     //     yPoses[i] = 0;
     // }
 
-    for (int i = 0; i < POINT_DENSITY; ++i) // 2 cycle circle
+
+
+    #ifdef CCW
+    for (int i = 0; i < POINT_DENSITY; ++i) 
     {
         float t = i / (float)POINT_DENSITY * 2 * 3.1415926; // t from 0 to 2*PI
-        xPoses[i] = 1 * sin(t);
-        yPoses[i] = 1 * cos(t);
+        xPoses[i] = CIRCLE_RADIUS * -sin(t);
+        yPoses[i] = CIRCLE_RADIUS * cos(t);
     }
+    #else
+    for (int i = 0; i < POINT_DENSITY; ++i) 
+    {
+        float t = i / (float)POINT_DENSITY * 2 * 3.1415926; // t from 0 to 2*PI
+        xPoses[i] = CIRCLE_RADIUS * sin(t);
+        yPoses[i] = CIRCLE_RADIUS * cos(t); 
+    }
+    #ifdef JENNY
+    // manual override for jenny's
+    {
+        auto xOverride = getXPoses();
+        auto yOverride = getYPoses();
+        for (int i = 0; i < POINT_DENSITY; ++i) {
+            xPoses[i] = xOverride[i];
+            yPoses[i] = yOverride[i];
+        }
+    }
+    #endif
+    #endif
+
 
     purePursuit.setPath(xPoses, yPoses, POINT_DENSITY);
     purePursuit.start();
@@ -141,16 +177,63 @@ static void runTheRobot(void *pvParameters)
     {
         // printf("IMU YAW: %f\n", IMUHelper::getYaw(true));
         int reflectance = colorSensor.getClear();
-        if (reflectance > thresh && state == State::ACTIVE_WANDERING)
+#ifndef WANDER        
+        if (reflectance > thresh && state == State::ACTIVE_MOVING)
         {
-            state = State::ESCAPED_REVERSE;
+            hitTheLineCount++;
+        } else {
+            hitTheLineCount = 0;
+        }
+        if (hitTheLineCount > 3) {
+            // state = State::ACTIVE_STOPPED;
+            // rotateTimer = 0;
+            // rotateMaxTime = 0;
+            // reverseTimer = esp_timer_get_time();
+            // ESP_LOGW(TAG, "Reflectance threshold exceeded! Stopping. Reflectance is %d", reflectance);
+        }
+#endif
+#ifdef WANDER
+        if (reflectance > thresh)
+        {
+            state = State::ESCAPE_REVERSE;
             rotateTimer = 0;
             rotateMaxTime = 0;
             reverseTimer = esp_timer_get_time();
-            ESP_LOGW(TAG, "Reflectance threshold exceeded! Reversing motors. %d", reflectance);
+            ESP_LOGW(TAG, "Reflectance threshold exceeded! Escape sequence initiated. Reflectance is %d", reflectance);
         }
+#endif
         switch (state)
         {
+#ifdef WANDER
+        case State::ACTIVE_WANDERING:
+        {
+            // Smooth random wandering
+            static double omega = 0.0;
+            static double targetOmega = 0.0;
+            if (++omegaChangeTimer >= omegaChangeInterval)
+            {
+                targetOmega = ((rand() % 200) / 100.0 - 1.0) * omegaMax; // random value in [-omegaMax, omegaMax]
+                omegaChangeTimer = 0;
+            }
+            // Smoothly interpolate omega toward targetOmega
+            if (fabs(omega - targetOmega) > omegaStep)
+            {
+                omega += omegaStep * ((targetOmega > omega) ? 1 : -1);
+            }
+            else
+            {
+                omega = targetOmega;
+            }
+            double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
+            double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
+            // motorLeft.set(left / 0.025);
+            // motorRight.set(right / 0.025);
+            motorLeft.set(0.5);
+            motorRight.set(0.5);
+            ESP_LOGI(TAG, "WANDER: omega=%.5f target=%.5f left=%.5f right=%.5f", omega, targetOmega, left, right);
+            led.set_color_rgb(0, 255, 0);
+            break;
+        }
         case State::REVERSE_THE_OTHER_WAY:
         {
             if (esp_timer_get_time() - rotateTimer < 3000000)
@@ -218,6 +301,8 @@ static void runTheRobot(void *pvParameters)
             led.set_color_rgb(0, 0, 255);
             break;
         }
+#endif
+#ifndef WANDER
         case State::CALIB_IMU:
         {
             // Code for calibrating IMU
@@ -239,38 +324,17 @@ static void runTheRobot(void *pvParameters)
             motorRight.stop();
             led.set_color_rgb(0, 255, 0);
             vTaskDelay(5000 / portTICK_PERIOD_MS); // wait for 5 seconds
-            Odometry::seed(Pose2d({0.0, 1, 0})); // Seed the odometry with a starting pose squircle/circle
+            #ifdef CCW
+            Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, -M_PI}));
+            #else
+            Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, 0})); // Seed the odometry with a starting pose squircle/circle
+            #ifdef JENNY
+            Odometry::seed(Pose2d({X_START, Y_START, H_START}));
+            #endif
+            #endif
             Odometry::start();
             state = State::ACTIVE_MOVING;
-            break;
-        }
-        case State::ACTIVE_WANDERING:
-        {
-            // Smooth random wandering
-            static double omega = 0.0;
-            static double targetOmega = 0.0;
-            if (++omegaChangeTimer >= omegaChangeInterval)
-            {
-                targetOmega = ((rand() % 200) / 100.0 - 1.0) * omegaMax; // random value in [-omegaMax, omegaMax]
-                omegaChangeTimer = 0;
-            }
-            // Smoothly interpolate omega toward targetOmega
-            if (fabs(omega - targetOmega) > omegaStep)
-            {
-                omega += omegaStep * ((targetOmega > omega) ? 1 : -1);
-            }
-            else
-            {
-                omega = targetOmega;
-            }
-            double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
-            double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
-            // motorLeft.set(left / 0.025);
-            // motorRight.set(right / 0.025);
-            motorLeft.set(0.5);
-            motorRight.set(0.5);
-            ESP_LOGI(TAG, "WANDER: omega=%.5f target=%.5f left=%.5f right=%.5f", omega, targetOmega, left, right);
-            led.set_color_rgb(0, 255, 0);
+            led.configure_blink(BLINK_MS, LED_COLOR, true, 0);
             break;
         }
         case State::ACTIVE_MOVING:
@@ -299,15 +363,25 @@ static void runTheRobot(void *pvParameters)
                 // motorLeft.stop();
                 // motorRight.stop();
                 ESP_LOGW(TAG, "Reached the goal!");
-                led.set_color_rgb(0, 255, 255);
             }
             break;
         }
+        case State::SPIN_IN_PLACE:
+        {
+            // Spin in place
+            ESP_LOGI(TAG, "Spinning in place");
+            motorLeft.setReferenceMetersPerSec(LINSPEED);
+            motorRight.setReferenceMetersPerSec(-LINSPEED);
+            break;
+        }
+#endif
         case State::ACTIVE_STOPPED:
         {
             // STOPPPPPPPPP
-            motorLeft.stop();
-            motorRight.stop();
+            led.configure_blink(500, {Color{255,0,0}, Color{0,0,0}}, true, 0);
+            motorLeft.brake();
+            motorRight.brake();
+            vTaskDelete(NULL);
             break;
         }
         default:
@@ -315,35 +389,12 @@ static void runTheRobot(void *pvParameters)
             break;
         }
         }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+        // ESP_LOGI(TAG, "State: %d, Reflectance: %d", (int)state, reflectance);
     }
 }
 
-void do_led(void *pvParameters)
-{
-    int red[] = {100, 230, 25, 30, 30, 50, 50, 100, 255, 255, 255, 255};
-    int green[] = {100, 100, 15, 10, 30, 15, 20, 20, 165, 0, 25, 50};
-    int blue[] = {100, 200, 40, 20, 30, 30, 80, 20, 50, 0, 0, 0};
-
-    while (true)
-    {
-
-        // pick a random color from the above arrays
-        int index = rand() % 6;
-        led.set_color_rgb(red[index], green[index], blue[index]);
-        ESP_LOGI(TAG, "LED ON%d R:%d G:%d B:%d", index, red[index], green[index], blue[index]);
-
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        // ESP_LOGI(TAG, "yaw: %.2f", IMUHelper::getYaw(true));
-
-        led.set_color_rgb(0, 0, 0);
-        ESP_LOGI(TAG, "LED OFF");
-
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-    }
-}
-
-static void setupHardware()
+static void setupHardware(void)
 {
     led.init();
     led.set_color_rgb(255, 255, 255);
@@ -373,7 +424,7 @@ static void setupHardware()
             if (eTaskGetState(imuInitTask) == eDeleted)
             {
                 imu_init_done = true;
-                Odometry::setUseImu(true);
+                Odometry::setUseImu(false);
                 state = State::CALIB_IMU;
             }
         }
@@ -385,6 +436,13 @@ static void setupHardware()
             state = State::WAITING_FOR_HUMAN;
         }
     }
+    Odometry::setUseImu(false);
+#ifdef WANDER
+    state = State::ACTIVE_WANDERING;
+#else
+        state = State::WAITING_FOR_HUMAN;
+
+#endif
 
     if (i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0) == ESP_OK)
     {
@@ -411,6 +469,7 @@ static void setupHardware()
     else
     {
         ESP_LOGE(TAG, "Failed to install I2C driver");
+        state = State::ACTIVE_STOPPED;
     }
 
     colorSensor.init(I2C_NUM_0, GPIO_NUM_5);
@@ -439,59 +498,28 @@ static void setupHardware()
     SettingsHelper::applySettings();
 }
 
-extern "C" void app_main()
+#ifdef CONNECT_WIFI
+static void connect_wifi(void *pvParameters)
 {
+    SNTPHelper::init();
+    WifiHelper::init();
+    vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5 second for wifi to init
+    Telemetry::init();
+    SNTPHelper::start();
+    SNTPHelper::waitForSync();
+    SNTPHelper::print_current_time();
+    Telemetry::waitForConnection();
 
-    ESP_ERROR_CHECK(nvs_flash_init());
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    // SettingsHelper::init();
-    // SNTPHelper::init();
-    // WifiHelper::init();
-    // vTaskDelay(5000 / portTICK_PERIOD_MS); // wait 5 second for wifi to init
-    // Telemetry::init();
-    setupHardware();
-    // SNTPHelper::start();
-    // SNTPHelper::waitForSync();
-    // SNTPHelper::print_current_time();
-    // Telemetry::waitForConnection();
-
-    SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
-    ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
-    SettingsHelper::registerDoubleCallback("robotWidth", [](const std::pair<const char *, double> &setting)
-                                           {
-        ROBOT_WIDTH = setting.second;
-        ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
-
-    SubscriptionHandle handleCommand2 = Telemetry::subscribe("ledcolor", [](const char *topic, const char *data, int data_len)
-                                                             {
-        ESP_LOGI(TAG, "Received LED color command: %.*s", data_len, data);
-        // Parse the color from the command
-        int r = 0, g = 0, b = 0;
-        sscanf(data, "[%d, %d, %d]", &r, &g, &b);
-        led.set_color_rgb(r, g, b); });
-
-
-    // TaskHandle_t ledHandle;
-    // xTaskCreate(do_led, "do_led", 4096, NULL, 1, &ledHandle);
-    ESP_LOGI(TAG, "STARTING");
-
-    SettingsHelper::addIntSetting("tcs/thresh", 150);
-    thresh = SettingsHelper::getIntSetting("tcs/thresh");
-    SettingsHelper::registerIntCallback("tcs/thresh", [](const std::pair<const char *, int> &p)
-                                        {
-        thresh = p.second;
-        ESP_LOGI(TAG, "TCS threshold set to: %d", p.second); });
-
-    uint8_t mac[6];
-    char macString[13];
-    esp_efuse_mac_get_default(mac);
-    snprintf(macString, sizeof(macString), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    printf("MAC Address: %s\n", macString);
-
-    TaskHandle_t robotHandle;
-    xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
-
+    SubscriptionHandle ledHandle = Telemetry::subscribe("led", [led](const char *topic, const char *data, int data_len)
+                                                    {
+            // parse data in string formation r,g,b
+        ESP_LOGI(TAG, "Received LED command: %.*s", data_len, data);
+        // Handle the command
+        uint8_t r = 0, g = 0, b = 0;
+        sscanf(data, "%hhu,%hhu,%hhu", &r, &g, &b);
+        led.set_color_rgb(r, g, b);
+        led.set_blink_on(false);
+    });
     SubscriptionHandle handlePos = Telemetry::subscribe("pos", [](const char *topic, const char *data, int data_len)
                                                         {
 
@@ -502,23 +530,31 @@ extern "C" void app_main()
         float y = 0;
         memcpy(&y, ptr, sizeof(float));
         ptr += sizeof(float);
+        ESP_LOGI(TAG, "Received position command: x=%f, y=%f", x, y);
         Odometry::seed(Pose2d(x, y, Odometry::getCurrentPose().getHeading()));
     });
     SubscriptionHandle handleCommand = Telemetry::subscribe("command", [](const char *topic, const char *data, int data_len)
                                                             {
         ESP_LOGI(TAG, "Received command: %.*s", data_len, data);
         // Handle the command
-        if (strncmp(data, "start", data_len) == 0)
+        if (strncmp(data, "set", 3) == 0)
         {
-            ESP_LOGI(TAG, "Starting the robot");
-            state = State::ACTIVE_WANDERING;
+            const char* ptr = data + 3;
+            int state = 0;
+            memcpy(&state, ptr, sizeof(int));
+            if (state < 0 || state > (int)State::SPIN_IN_PLACE) {
+                ESP_LOGW(TAG, "Invalid state value: %d", state);
+            } else {
+                ESP_LOGI(TAG, "Setting state to %d", state);
+                ::state = static_cast<State>(state);
+            }
         }
         else if (strncmp(data, "stop", data_len) == 0)
         {
             ESP_LOGI(TAG, "Stopping the robot");
-            motorLeft.stop();
-            motorRight.stop();
-            state = State::IDLE;
+            motorLeft.brake();
+            motorRight.brake();
+            ::state = State::IDLE;
         }
         else if (strncmp(data, "respos", 6) == 0)
         {
@@ -563,31 +599,79 @@ extern "C" void app_main()
                 }
             }
         }
-        else if (strncmp(data, "blink_pattern", 13) == 0)
+        else if (strncmp(data, "led", 3) == 0)
         {
-            std::vector<Color> colors;
-
-            ESP_LOGI(TAG, "Loading blink pattern");
-            // Load the blink pattern data
-            // command should be structured like "blink_pattern, [128, 255, 0], [1, 2, 48], [89, 89, 89]..."
-            for (int i = 15; i < data_len; i++)
-            {
-                if (data[i] == '[')
-                {
-                    i++;
-                    int j = 0;
-                    if (i < data_len) // could run into out of bounds error if not formatted correctly
-                    {
-                        int r = 0, g = 0, b = 0;
-                        sscanf(&data[i], "[%d, %d, %d]", &r, &g, &b);
-                        colors.push_back(Color{static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b)});
+            // Format: "ledA[r,g,b][r,g,b]..." where A is int, followed by A sets of 3 uint8_t values for r,g,b
+            if (data_len < 3 + sizeof(int)) {
+                ESP_LOGW(TAG, "Malformed led command: too short");
+            } else {
+                const char* ptr = data + 3;
+                int n = 0;
+                memcpy(&n, ptr, sizeof(int));
+                ptr += sizeof(int);
+                if (data_len < 3 + sizeof(int) + n * 3 * sizeof(uint8_t)) {
+                    ESP_LOGW(TAG, "Malformed led command: not enough data for %d colors", n);
+                } else {
+                    std::vector<Color> colors;
+                    for (int i = 0; i < n; ++i) {
+                        uint8_t r = ptr[0];
+                        uint8_t g = ptr[1];
+                        uint8_t b = ptr[2];
+                        colors.push_back(Color{r, g, b});
+                        ptr += 3;
                     }
+                    ESP_LOGI(TAG, "Loaded LED pattern with %d colors. First: R=%d G=%d B=%d", n, colors[0].r, colors[0].g, colors[0].b);
+                    led.change_blink_pattern(colors);
                 }
             }
-            led.change_blink_pattern(colors);
         }
         else
         {
             ESP_LOGW(TAG, "Unknown command: %.*s", data_len, data);
         } });
+
+    vTaskDelete(NULL);
+}
+#endif
+
+extern "C" void app_main()
+{
+
+    ESP_ERROR_CHECK(nvs_flash_init());
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    SettingsHelper::init();
+
+    setupHardware();
+    #ifdef CONNECT_WIFI
+    xTaskCreate(connect_wifi, "connect_wifi", 8192, NULL, 5, NULL);
+    #endif
+
+    SettingsHelper::addDoubleSetting("robotWidth", ROBOT_WIDTH);
+    ROBOT_WIDTH = SettingsHelper::getDoubleSetting("robotWidth");
+    SettingsHelper::registerDoubleCallback("robotWidth", [](const std::pair<const char *, double> &setting)
+                                           {
+        ROBOT_WIDTH = setting.second;
+        ESP_LOGI(TAG, "Set robot width to %f", ROBOT_WIDTH); });
+
+    ESP_LOGI(TAG, "STARTING");
+
+    SettingsHelper::addIntSetting("tcs/thresh", 150);
+    thresh = SettingsHelper::getIntSetting("tcs/thresh");
+    SettingsHelper::registerIntCallback("tcs/thresh", [](const std::pair<const char *, int> &p)
+                                        {
+        thresh = p.second;
+        ESP_LOGI(TAG, "TCS threshold set to: %d", p.second); });
+
+    uint8_t mac[6];
+    char macString[13];
+    esp_efuse_mac_get_default(mac);
+    snprintf(macString, sizeof(macString), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    printf("MAC Address: %s\n", macString);
+
+
+    TaskHandle_t robotHandle;
+    xTaskCreate(runTheRobot, "runTheRobot", 10240, NULL, 5, &robotHandle);
+    
+    
 }

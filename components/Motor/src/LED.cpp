@@ -87,9 +87,7 @@ void LED::init(int pin_r, int pin_g, int pin_b, ledc_timer_t timer)
         .name = "LedTimer",
         .skip_unhandled_events = false
     };
-    // esp_timer_create(&timer_args, &timerHandle);
-    // esp_timer_start_periodic(timerHandle, delay_ms * 1000); // Convert milliseconds to microseconds
-    // blink_is_on = true;
+    esp_timer_create(&timer_args, &timerHandle);
 }
 
 void LED::change_blink_delay(int new_delay) {
@@ -126,6 +124,7 @@ void LED::configure_blink(int delay, std::vector<Color> pattern, bool blink_on, 
     if (!pattern.empty() && pattern != colors) {
         change_blink_pattern(pattern);
     }
+    ESP_LOGI(TAG, "Blink configured: delay=%d, pattern size=%d, blink_on=%d, step=%d", delay, (int)pattern.size(), blink_on, new_step);
     set_blink_on(blink_on);
     set_step(new_step);
 }
@@ -155,25 +154,16 @@ void LED::blink(void) {
 
     set_color_rgb(colors[step]);
     step++;
-    // ESP_LOGI(TAG, "LED Color: R=%d, G=%d, B=%d, Step=%d", current_color.r, current_color.g, current_color.b, step);
-    if (current_color.r == 255 && current_color.g == 0 && current_color.b == 0) {
-        ESP_LOGI(TAG, "LED Color: RED");
-    } else if (current_color.r == 0 && current_color.g == 255 && current_color.b == 0) {
-        ESP_LOGI(TAG, "LED Color: GREEN");
-    } else if (current_color.r == 0 && current_color.g == 0 && current_color.b == 255) {
-        ESP_LOGI(TAG, "LED Color: BLUE");
-    } else {
-        ESP_LOGI(TAG, "LED Color: R=%d, G=%d, B=%d", current_color.r, current_color.g, current_color.b);
-    }
+    ESP_LOGV(TAG, "LED Color: R=%d, G=%d, B=%d, Step=%d", current_color.r, current_color.g, current_color.b, step);
     if (step >= colors.size()) {
         step = 0;
-        ESP_LOGI(TAG, "LED Pattern Restarted");
+        ESP_LOGV(TAG, "LED Pattern Restarted");
     }
-    if (delay_ms >= 500 || step % (500 / delay_ms) == 0) { // publish color data every ~500ms or every step (if delay_ms > 500ms)
-        char color_str[50];
-        snprintf(color_str, sizeof(color_str), "\"r\": %d, \"g\": %d, \"b\": %d, \"step\": %d", current_color.r, current_color.g, current_color.b, step);
-        Telemetry::publishData("led", color_str, 0);
-    }
+    // if (delay_ms >= 500 || step % (500 / delay_ms) == 0) { // publish color data every ~500ms or every step (if delay_ms > 500ms)
+    //     char color_str[50];
+    //     snprintf(color_str, sizeof(color_str), "\"r\": %d, \"g\": %d, \"b\": %d, \"step\": %d", current_color.r, current_color.g, current_color.b, step);
+    //     Telemetry::publishData("led", color_str, 0);
+    // }
 }
 
 void LED::set_color_rgb(Color c) {

@@ -51,7 +51,7 @@
 // #define H_START 1.7126933813990632
 
 #define POINT_DENSITY 400
-#define CIRCLE_RADIUS 1.25
+#define CIRCLE_RADIUS 1.5
 // #define CCW 1
 #define LINSPEED 0.01
 #define BLINK_MS 1000
@@ -61,7 +61,7 @@
 
 double ROBOT_WIDTH = 0.13; // in meters
 
-// #define CONNECT_WIFI 1
+#define CONNECT_WIFI 1
 // #define WANDER 1
 // VL53L0X sensor;
 TCS34725 colorSensor = TCS34725();
@@ -98,7 +98,7 @@ VL53L0X sensorLeft;
 VL53L0X sensorRight;
 
 LED led;
-PurePursuit purePursuit = PurePursuit(0.05); // Look ahead distance
+PurePursuit purePursuit = PurePursuit(0.05); // Look ahead distance 0.05
 
 State state = State::IDLE;
 static int thresh;
@@ -333,7 +333,7 @@ static void runTheRobot(void *pvParameters)
             #endif
             #endif
             Odometry::start();
-            state = State::ACTIVE_MOVING;
+            // state = State::ACTIVE_MOVING;
             led.configure_blink(BLINK_MS, LED_COLOR, true, 0);
             break;
         }
@@ -347,8 +347,8 @@ static void runTheRobot(void *pvParameters)
                                     pose.getY(),
                                     pose.getHeading());
                 double omega = purePursuit.getCurvature() * LINSPEED; // m^-1 v_d = 0.01 m/s
-                double right = LINSPEED + ROBOT_WIDTH * omega / 2.0;
-                double left = LINSPEED - ROBOT_WIDTH * omega / 2.0;
+                double right = (LINSPEED + ROBOT_WIDTH * omega / 2.0);
+                double left = (LINSPEED - ROBOT_WIDTH * omega / 2.0);
 
                 printf("Left: %f, Right: %f, Omega: %f, curvature: %f, X: %f, Y: %f, H: %f, Gx: %f, Gy: %f\n", left, right, omega, purePursuit.getCurvature(), pose.getX(), pose.getY(), pose.getHeading() * 180 / M_PI, purePursuit.getGoalX(), purePursuit.getGoalY());
                 motorLeft.setReferenceMetersPerSec(left);

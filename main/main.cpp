@@ -51,11 +51,11 @@
 // #define H_START 1.7126933813990632
 
 #define POINT_DENSITY 400
-#define CIRCLE_RADIUS 1.25
+#define CIRCLE_RADIUS 1
 // #define CCW 1
-#define LINSPEED 0.01
+#define LINSPEED 0.02
 #define BLINK_MS 1000
-#define THE_COLOR Color{255,0,10}
+#define THE_COLOR Color{0,255,50}
 #define LED_COLOR {THE_COLOR,THE_COLOR,THE_COLOR,Color{0, 0, 0},Color{0, 0, 0},Color{0, 0, 0},Color{0, 0, 0}}
 // #define LED_COLOR {THE_COLOR,Color{0, 0, 0}}
 
@@ -358,7 +358,7 @@ static void runTheRobot(void *pvParameters)
             else
             {
                 purePursuit = PurePursuit(0.05);
-                purePursuit.setPath(xPoses, yPoses, 200);
+                purePursuit.setPath(xPoses, yPoses, POINT_DENSITY);
                 purePursuit.start();
                 // motorLeft.stop();
                 // motorRight.stop();

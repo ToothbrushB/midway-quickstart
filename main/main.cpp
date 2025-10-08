@@ -324,13 +324,12 @@ static void runTheRobot(void *pvParameters)
             motorRight.stop();
             led.set_color_rgb(0, 255, 0);
             vTaskDelay(5000 / portTICK_PERIOD_MS); // wait for 5 seconds
-            #ifdef CCW
-            Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, -M_PI}));
-            #else
-            Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, 0})); // Seed the odometry with a starting pose squircle/circle
-            #ifdef JENNY
-            Odometry::seed(Pose2d({X_START, Y_START, H_START}));
-            #endif
+            #ifndef CONNECT_WIFI
+                #ifdef CCW
+                Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, -M_PI}));
+                #else
+                Odometry::seed(Pose2d({0.0, CIRCLE_RADIUS, 0})); // Seed the odometry with a starting pose squircle/circle
+                #endif
             #endif
             Odometry::start();
             // state = State::ACTIVE_MOVING;
